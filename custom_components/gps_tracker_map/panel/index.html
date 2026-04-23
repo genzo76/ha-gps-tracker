@@ -677,6 +677,7 @@
     </select>
     <button class="icon-btn" onclick="doRefresh()" title="Aggiorna">🔄</button>
     <button class="icon-btn" onclick="openSettings()" title="Impostazioni">⚙️</button>
+    <button class="icon-btn" onclick="toggleDebug()" title="Debug log">🐛</button>
   </div>
 
   <!-- Main -->
@@ -742,6 +743,15 @@
     </div>
   </div>
 
+  <!-- Debug Log Panel -->
+  <div id="debugPanel" style="display:none;position:fixed;bottom:10px;left:50%;transform:translateX(-50%);width:92%;max-width:620px;max-height:280px;overflow-y:auto;background:rgba(15,20,35,.95);border:1px solid #6366f1;border-radius:12px;padding:12px;z-index:9999;font-size:11px;color:#94a3b8;font-family:monospace;backdrop-filter:blur(8px)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <b style="color:#a78bfa">🐛 Debug Log</b>
+      <button onclick="toggleDebug()" style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:16px">✕</button>
+    </div>
+    <div id="debugContent" style="line-height:1.6"></div>
+  </div>
+
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
   <script>
@@ -762,7 +772,7 @@
 
     function initMap() {
       map = L.map('map', { center: [41.9, 12.5], zoom: 6 });
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
         attribution: '&copy; OpenStreetMap &copy; CARTO',
         subdomains: 'abcd', maxZoom: 20
       }).addTo(map);
@@ -813,8 +823,22 @@
       window.open((cfg.url || window.location.origin) + '/profile', '_blank');
     }
 
+    // ─── DEBUG LOG ────────────────────────────────────────
+    const _log = [];
+    function addLog(msg) {
+      const ts = new Date().toLocaleTimeString('it-IT');
+      _log.unshift(`[${ts}] ${msg}`);
+      if (_log.length > 60) _log.pop();
+      const el = document.getElementById('debugContent');
+      if (el) el.innerHTML = _log.map(l => `<div>${l}</div>`).join('');
+    }
+    function toggleDebug() {
+      const p = document.getElementById('debugPanel');
+      p.style.display = p.style.display === 'none' ? 'block' : 'none';
+      if (p.style.display !== 'none') addLog('-- log aperto --');
+    }
+
     // ─── AUTH HELPER ──────────────────────────────────────
-    // Adds HA session cookie automatically; Bearer token only if configured
     function haFetch(url, extraHeaders = {}) {
       const headers = { ...extraHeaders };
       if (cfg.token) headers['Authorization'] = `Bearer ${cfg.token}`;
@@ -823,9 +847,19 @@
 
     // ─── TRACKER DISCOVERY ────────────────────────────────
     async function loadTrackers() {
+      addLog('loadTrackers: inizio discovery...');
       try {
         const res = await haFetch(`${cfg.url}/api/states`);
-        if (!res.ok) throw new Error('Impossibile caricare i tracker');
+        if (!res.ok) {
+          addLog(`loadTrackers: HTTP ${res.status} — auth fallita`);
+          setLoading(false);
+          if (res.status === 401) {
+            document.getElementById('errMsg').textContent = '⚠️ Auth fallita (401): inserisci il token nelle impostazioni.';
+            document.getElementById('errMsg').style.display = 'block';
+          }
+          openSettings();
+          return;
+        }
         const states = await res.json();
         const trackers = states
           .filter(s => s.entity_id.startsWith('device_tracker.'))
@@ -835,6 +869,7 @@
             return nameA.localeCompare(nameB);
           });
 
+        addLog(`loadTrackers: trovati ${trackers.length} tracker`);
         const sel = document.getElementById('trackerSelect');
         sel.innerHTML = '<option value="">— Seleziona tracker —</option>';
         trackers.forEach(t => {
@@ -846,18 +881,21 @@
           sel.appendChild(opt);
         });
         sel.style.display = trackers.length ? 'block' : 'none';
-        syncMobSelect(trackers, cfg.entity); // keep mobile select in sync
+        syncMobSelect(trackers, cfg.entity);
 
-        // if we already have entity configured, load it; else pick first
         if (!cfg.entity && trackers.length) {
           cfg.entity = trackers[0].entity_id;
           sel.value = cfg.entity;
           localStorage.setItem('ha_gps_tracker_cfg', JSON.stringify(cfg));
         }
         if (cfg.entity) loadData();
+        else { setLoading(false); openSettings(); }
       } catch (e) {
+        addLog(`loadTrackers: errore — ${e.message}`);
         console.error('loadTrackers:', e);
-        if (cfg.entity) loadData(); // fallback
+        setLoading(false);
+        if (cfg.entity) loadData();
+        else openSettings();
       }
     }
 
@@ -874,19 +912,24 @@
       clearRefreshTimer();
       try {
         // 1) Try our own GPS history DB first (plugin polls every minute)
+        addLog(`loadData: provo DB custom per ${cfg.entity}...`);
         const dbRes = await haFetch(
           `/api/gps_tracker_map/history?entity_id=${encodeURIComponent(cfg.entity)}&days=${cfg.days}`
         );
         if (dbRes.ok) {
           const rows = await dbRes.json();
+          addLog(`loadData: DB custom → ${rows.length} punti`);
           if (rows.length >= 2) {
             processFromCustomDb(rows);
             scheduleRefresh();
             return;
           }
+        } else {
+          addLog(`loadData: DB custom HTTP ${dbRes.status} (endpoint non ancora attivo?)`);
         }
 
         // 2) Fallback: HA History API (only has zone transitions)
+        addLog('loadData: fallback su HA recorder...');
         const end = new Date();
         const start = new Date(end - cfg.days * 86400000);
         const res = await haFetch(
@@ -1006,11 +1049,18 @@
       if (!cfg.entity) return;
       try {
         const res = await haFetch(`${cfg.url}/api/states/${encodeURIComponent(cfg.entity)}`);
-        if (!res.ok) return;
+        if (!res.ok) {
+          addLog(`📡 real-time HTTP ${res.status} — auth ok? token inserito?`);
+          return;
+        }
         const state = await res.json();
         const lat = parseFloat(state.attributes?.latitude);
         const lng = parseFloat(state.attributes?.longitude);
-        if (isNaN(lat) || isNaN(lng)) return;
+        if (isNaN(lat) || isNaN(lng)) {
+          addLog(`📡 real-time: stato=${state.state}, lat/lng assenti negli attributi`);
+          return;
+        }
+        addLog(`📡 real-time: ${state.state} @ ${lat.toFixed(5)},${lng.toFixed(5)} (acc:${state.attributes?.gps_accuracy ?? '?'}m)`);
 
         // Remove old real-time layer
         if (realtimeLayer) { map.removeLayer(realtimeLayer); realtimeLayer = null; }
