@@ -816,11 +816,14 @@
       try {
         const end = new Date();
         const start = new Date(end - cfg.days * 86400000);
-        const apiUrl = `${cfg.url}/api/history/period/${start.toISOString()}` +
-          `?filter_entity_id=${cfg.entity}&end_time=${end.toISOString()}&significant_changes_only=false&minimal_response=false`;
-        const res = await fetch(apiUrl, {
-          headers: { 'Authorization': `Bearer ${cfg.token}` }
-        });
+        const startIso = start.toISOString();
+        const endIso = end.toISOString();
+
+        // 1) Query device_tracker history
+        const res = await fetch(
+          `${cfg.url}/api/history/period/${startIso}?filter_entity_id=${cfg.entity}&end_time=${endIso}&significant_changes_only=false&minimal_response=false`,
+          { headers: { 'Authorization': `Bearer ${cfg.token}` } }
+        );
         if (!res.ok) {
           if (res.status === 401) throw new Error('Token non valido. Aprire le impostazioni e rigenerare il token.');
           if (res.status === 404) throw new Error(`Entità "${cfg.entity}" non trovata in HA.`);
@@ -828,29 +831,76 @@
         }
         const json = await res.json();
         const states = json[0] || [];
-        processStates(states);
+        const gpsStates = states.filter(s => s.attributes?.latitude && s.attributes?.longitude);
+
+        // 2) If very few GPS points, try latitude/longitude sensor entities (HA Companion creates these)
+        if (gpsStates.length < 3) {
+          const baseName = cfg.entity.replace('device_tracker.', '');
+          const latEnt = `sensor.${baseName}_latitude`;
+          const lngEnt = `sensor.${baseName}_longitude`;
+          try {
+            const sRes = await fetch(
+              `${cfg.url}/api/history/period/${startIso}?filter_entity_id=${latEnt},${lngEnt}&end_time=${endIso}&significant_changes_only=false&minimal_response=false`,
+              { headers: { 'Authorization': `Bearer ${cfg.token}` } }
+            );
+            if (sRes.ok) {
+              const sData = await sRes.json();
+              const latHist = (sData.find(a => a[0]?.entity_id === latEnt) || []).filter(s => !isNaN(parseFloat(s.state)));
+              const lngHist = (sData.find(a => a[0]?.entity_id === lngEnt) || []).filter(s => !isNaN(parseFloat(s.state)));
+              if (latHist.length > 2 && lngHist.length > 2) {
+                processFromSensors(latHist, lngHist);
+                scheduleRefresh();
+                return;
+              }
+            }
+          } catch (_) {}
+          // Show low-data hint
+          showLowDataHint(gpsStates.length);
+        }
+
+        processStates(gpsStates);
         scheduleRefresh();
       } catch (e) {
         setLoading(false);
         document.getElementById('noData').style.display = 'block';
         document.querySelector('.no-data-text').textContent = '⚠️ ' + e.message;
-        document.getElementById('noData').style.display = 'block';
         console.error(e);
       }
     }
 
-    function processStates(states) {
-      allData = {};
-      const points = states
-        .filter(s => s.attributes?.latitude && s.attributes?.longitude)
-        .map(s => ({
-          lat: parseFloat(s.attributes.latitude),
-          lng: parseFloat(s.attributes.longitude),
-          acc: s.attributes.gps_accuracy || 0,
-          time: new Date(s.last_updated),
-          speed: 0, dist: 0
-        }));
+    // Build GPS points from separate lat/lng sensor history
+    function processFromSensors(latHist, lngHist) {
+      const lngMap = {};
+      lngHist.forEach(s => { lngMap[new Date(s.last_updated).getTime()] = parseFloat(s.state); });
+      const points = [];
+      latHist.forEach(s => {
+        const lat = parseFloat(s.state);
+        const t = new Date(s.last_updated).getTime();
+        let bestLng = null, bestDiff = 30000;
+        Object.entries(lngMap).forEach(([ts, lng]) => {
+          const diff = Math.abs(parseInt(ts) - t);
+          if (diff < bestDiff) { bestDiff = diff; bestLng = lng; }
+        });
+        if (bestLng !== null && !isNaN(lat)) {
+          points.push({ lat, lng: bestLng, acc: 0, time: new Date(s.last_updated), speed: 0, dist: 0 });
+        }
+      });
+      processPoints(points.sort((a, b) => a.time - b.time));
+    }
 
+    function processStates(gpsStates) {
+      const points = gpsStates.map(s => ({
+        lat: parseFloat(s.attributes.latitude),
+        lng: parseFloat(s.attributes.longitude),
+        acc: s.attributes.gps_accuracy || 0,
+        time: new Date(s.last_updated),
+        speed: 0, dist: 0
+      }));
+      processPoints(points);
+    }
+
+    function processPoints(points) {
+      allData = {};
       if (!points.length) {
         setLoading(false);
         document.getElementById('noData').style.display = 'block';
@@ -872,14 +922,24 @@
         (allData[k] = allData[k] || []).push(p);
       });
 
-      // Update header
       document.getElementById('headerSub').textContent = cfg.entity;
-
       buildDayTabs();
-      // Select the most recent day
-      const sorted = sortedDays();
-      selectDay(sorted[0]);
+      selectDay(sortedDays()[0]);
       setLoading(false);
+    }
+
+    function showLowDataHint(count) {
+      const nd = document.getElementById('noData');
+      nd.style.display = 'block';
+      document.querySelector('.no-data-text').innerHTML =
+        (count === 0 ? 'Nessun dato GPS trovato.' : `Solo ${count} punto/i trovato/i.`) +
+        '<br><br>' +
+        '<b style="color:#a78bfa">Per abilitare il tracking continuo:</b><br>' +
+        '1. Apri <b>HA Companion</b> sul telefono<br>' +
+        '2. Impostazioni app → <b>Gestione sensori</b><br>' +
+        '3. Abilita <b>"Posizione in background"</b><br>' +
+        '4. Oppure in HA: <b>Impostazioni → Sistema → Registratore</b><br>' +
+        '   aggiungi <code>device_tracker</code> agli attributi registrati';
     }
 
     // ─── TABS ─────────────────────────────────────────────
