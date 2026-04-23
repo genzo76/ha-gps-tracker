@@ -738,7 +738,7 @@
         const end = new Date();
         const start = new Date(end - cfg.days * 86400000);
         const apiUrl = `${cfg.url}/api/history/period/${start.toISOString()}` +
-          `?filter_entity_id=${cfg.entity}&end_time=${end.toISOString()}`;
+          `?filter_entity_id=${cfg.entity}&end_time=${end.toISOString()}&significant_changes_only=false&minimal_response=false`;
         const res = await fetch(apiUrl, {
           headers: { 'Authorization': `Bearer ${cfg.token}` }
         });
