@@ -567,8 +567,9 @@
     <div class="modal">
       <div class="modal-title">⚙️ Configurazione</div>
       <div class="modal-sub">
-        Inserisci il tuo <strong style="color:#a78bfa">Long-Lived Access Token</strong> di Home Assistant.<br>
-        <a href="#" onclick="openProfilePage()">Come generarlo: Profilo HA → Token di accesso →</a>
+        Il pannello funziona già se sei <strong style="color:#34d399">loggato in Home Assistant</strong> — nessun token necessario.<br>
+        Inserisci un token solo se accedi da esterno o hai problemi di autenticazione.<br>
+        <a href="#" onclick="openProfilePage()">Genera token → Profilo HA → Token di accesso di lunga durata</a>
       </div>
       <div class="error-msg" id="errMsg"></div>
       <div class="form-group">
@@ -577,9 +578,9 @@
         <span class="form-hint">L'indirizzo con cui accedi a HA</span>
       </div>
       <div class="form-group">
-        <label class="form-label">Long-Lived Access Token</label>
-        <input class="form-input" id="cfgToken" type="password" placeholder="eyJ0eXAiOiJKV1Qi..." />
-        <span class="form-hint">Profilo → Sicurezza → Token di accesso di lunga durata</span>
+        <label class="form-label">Long-Lived Access Token <span style="color:#475569">(opzionale)</span></label>
+        <input class="form-input" id="cfgToken" type="password" placeholder="Solo se accedi da fuori HA o hai errori 401" />
+        <span class="form-hint">Lascia vuoto se sei già loggato nel browser/app HA</span>
       </div>
       <div class="form-group">
         <label class="form-label">Entity ID Device Tracker (opzionale)</label>
@@ -717,15 +718,12 @@
     function loadConfig() {
       const saved = localStorage.getItem('ha_gps_tracker_cfg');
       if (saved) {
-        try {
-          cfg = { ...cfg, ...JSON.parse(saved) };
-          if (cfg.token) { loadTrackers(); return; }
-        } catch (_) { }
+        try { cfg = { ...cfg, ...JSON.parse(saved) }; } catch (_) { }
       }
-      // Pre-fill URL from page origin
       cfg.url = window.location.origin;
-      setLoading(false);
-      openSettings();
+      // Always try to load — session cookie handles auth automatically
+      setLoading(true);
+      loadTrackers();
     }
 
     // ─── SETTINGS ─────────────────────────────────────────
@@ -746,7 +744,6 @@
       const entity = document.getElementById('cfgEntity').value.trim();
       const days = parseInt(document.getElementById('cfgDays').value) || 3;
       const refresh = parseInt(document.getElementById('cfgRefresh').value) || 5;
-      if (!token) { showErr('Il Token è obbligatorio!'); return; }
       cfg = { url, token, entity, days, refresh };
       localStorage.setItem('ha_gps_tracker_cfg', JSON.stringify(cfg));
       closeSettings();
@@ -761,12 +758,18 @@
       window.open((cfg.url || window.location.origin) + '/profile', '_blank');
     }
 
+    // ─── AUTH HELPER ──────────────────────────────────────
+    // Adds HA session cookie automatically; Bearer token only if configured
+    function haFetch(url, extraHeaders = {}) {
+      const headers = { ...extraHeaders };
+      if (cfg.token) headers['Authorization'] = `Bearer ${cfg.token}`;
+      return fetch(url, { credentials: 'include', headers });
+    }
+
     // ─── TRACKER DISCOVERY ────────────────────────────────
     async function loadTrackers() {
       try {
-        const res = await fetch(`${cfg.url}/api/states`, {
-          headers: { 'Authorization': `Bearer ${cfg.token}` }
-        });
+        const res = await haFetch(`${cfg.url}/api/states`);
         if (!res.ok) throw new Error('Impossibile caricare i tracker');
         const states = await res.json();
         const trackers = states
@@ -815,9 +818,8 @@
       clearRefreshTimer();
       try {
         // 1) Try our own GPS history DB first (plugin polls every minute)
-        const dbRes = await fetch(
-          `/api/gps_tracker_map/history?entity_id=${encodeURIComponent(cfg.entity)}&days=${cfg.days}`,
-          { headers: { 'Authorization': `Bearer ${cfg.token}` } }
+        const dbRes = await haFetch(
+          `/api/gps_tracker_map/history?entity_id=${encodeURIComponent(cfg.entity)}&days=${cfg.days}`
         );
         if (dbRes.ok) {
           const rows = await dbRes.json();
@@ -831,9 +833,8 @@
         // 2) Fallback: HA History API (only has zone transitions)
         const end = new Date();
         const start = new Date(end - cfg.days * 86400000);
-        const res = await fetch(
-          `${cfg.url}/api/history/period/${start.toISOString()}?filter_entity_id=${cfg.entity}&end_time=${end.toISOString()}&significant_changes_only=false&minimal_response=false`,
-          { headers: { 'Authorization': `Bearer ${cfg.token}` } }
+        const res = await haFetch(
+          `${cfg.url}/api/history/period/${start.toISOString()}?filter_entity_id=${cfg.entity}&end_time=${end.toISOString()}&significant_changes_only=false&minimal_response=false`
         );
         if (!res.ok) {
           if (res.status === 401) throw new Error('Token non valido. Aprire le impostazioni e rigenerare il token.');
