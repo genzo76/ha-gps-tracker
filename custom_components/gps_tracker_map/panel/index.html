@@ -71,6 +71,34 @@
       gap: 8px
     }
 
+    /* ── TRACKER SELECT ── */
+    .tracker-select {
+      appearance: none;
+      background: rgba(255,255,255,.07);
+      border: 1px solid rgba(99,102,241,.3);
+      border-radius: 9px;
+      color: #e2e8f0;
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 500;
+      padding: 6px 28px 6px 10px;
+      cursor: pointer;
+      outline: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2.5'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 8px center;
+      max-width: 200px;
+      transition: all .2s;
+    }
+    .tracker-select:hover, .tracker-select:focus {
+      border-color: rgba(99,102,241,.6);
+      background-color: rgba(99,102,241,.1);
+    }
+    .tracker-select option {
+      background: #1a1f2e;
+      color: #e2e8f0;
+    }
+
     /* ── TABS ── */
     .day-tabs {
       display: flex;
@@ -554,9 +582,9 @@
         <span class="form-hint">Profilo → Sicurezza → Token di accesso di lunga durata</span>
       </div>
       <div class="form-group">
-        <label class="form-label">Entity ID Device Tracker</label>
-        <input class="form-input" id="cfgEntity" placeholder="device_tracker.il_mio_telefono" />
-        <span class="form-hint">Visibile in HA → Impostazioni → Entità</span>
+        <label class="form-label">Entity ID Device Tracker (opzionale)</label>
+        <input class="form-input" id="cfgEntity" placeholder="Auto-rilevato dopo salvataggio" />
+        <span class="form-hint">Lascia vuoto per auto-rilevare · oppure incolla l'entity_id manualmente</span>
       </div>
       <div class="form-row">
         <div class="form-group">
@@ -583,6 +611,9 @@
       <div class="header-sub" id="headerSub">Configura le impostazioni per iniziare</div>
     </div>
     <div class="header-right">
+      <select class="tracker-select" id="trackerSelect" title="Seleziona tracker" onchange="onTrackerChange(this.value)" style="display:none">
+        <option value="">— Seleziona tracker —</option>
+      </select>
       <div class="day-tabs" id="dayTabs"></div>
       <button class="icon-btn" id="btnRefresh" onclick="doRefresh()" title="Aggiorna dati">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
@@ -688,7 +719,7 @@
       if (saved) {
         try {
           cfg = { ...cfg, ...JSON.parse(saved) };
-          if (cfg.token && cfg.entity) { loadData(); return; }
+          if (cfg.token) { loadTrackers(); return; }
         } catch (_) { }
       }
       // Pre-fill URL from page origin
@@ -715,11 +746,11 @@
       const entity = document.getElementById('cfgEntity').value.trim();
       const days = parseInt(document.getElementById('cfgDays').value) || 3;
       const refresh = parseInt(document.getElementById('cfgRefresh').value) || 5;
-      if (!token || !entity) { showErr('Token ed Entity ID sono obbligatori!'); return; }
+      if (!token) { showErr('Il Token è obbligatorio!'); return; }
       cfg = { url, token, entity, days, refresh };
       localStorage.setItem('ha_gps_tracker_cfg', JSON.stringify(cfg));
       closeSettings();
-      loadData();
+      loadTrackers();
     }
     function showErr(msg) {
       const el = document.getElementById('errMsg');
@@ -728,6 +759,54 @@
     }
     function openProfilePage() {
       window.open((cfg.url || window.location.origin) + '/profile', '_blank');
+    }
+
+    // ─── TRACKER DISCOVERY ────────────────────────────────
+    async function loadTrackers() {
+      try {
+        const res = await fetch(`${cfg.url}/api/states`, {
+          headers: { 'Authorization': `Bearer ${cfg.token}` }
+        });
+        if (!res.ok) throw new Error('Impossibile caricare i tracker');
+        const states = await res.json();
+        const trackers = states
+          .filter(s => s.entity_id.startsWith('device_tracker.'))
+          .sort((a, b) => {
+            const nameA = a.attributes.friendly_name || a.entity_id;
+            const nameB = b.attributes.friendly_name || b.entity_id;
+            return nameA.localeCompare(nameB);
+          });
+
+        const sel = document.getElementById('trackerSelect');
+        sel.innerHTML = '<option value="">— Seleziona tracker —</option>';
+        trackers.forEach(t => {
+          const opt = document.createElement('option');
+          opt.value = t.entity_id;
+          opt.textContent = (t.attributes.friendly_name || t.entity_id)
+            + (t.state && t.state !== 'unknown' ? ` (${t.state})` : '');
+          if (t.entity_id === cfg.entity) opt.selected = true;
+          sel.appendChild(opt);
+        });
+        sel.style.display = trackers.length ? 'block' : 'none';
+
+        // if we already have entity configured, load it; else pick first
+        if (!cfg.entity && trackers.length) {
+          cfg.entity = trackers[0].entity_id;
+          sel.value = cfg.entity;
+          localStorage.setItem('ha_gps_tracker_cfg', JSON.stringify(cfg));
+        }
+        if (cfg.entity) loadData();
+      } catch (e) {
+        console.error('loadTrackers:', e);
+        if (cfg.entity) loadData(); // fallback
+      }
+    }
+
+    function onTrackerChange(entityId) {
+      if (!entityId) return;
+      cfg.entity = entityId;
+      localStorage.setItem('ha_gps_tracker_cfg', JSON.stringify(cfg));
+      loadData();
     }
 
     // ─── DATA LOADING ─────────────────────────────────────
