@@ -1,0 +1,20 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "GPS Tracker Map",
+        "description": "Seleziona il device tracker da monitorare (es: {entity_example})",
+        "data": {
+          "entity_id": "Entità Device Tracker",
+          "days": "Giorni di storico (1-30)"
+        }
+      }
+    },
+    "error": {
+      "entity_not_found": "Entità non trovata. Verifica che l'app HA Companion sia configurata."
+    },
+    "abort": {
+      "already_configured": "Questa entità è già configurata."
+    }
+  }
+}

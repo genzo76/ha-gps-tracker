@@ -1,0 +1,989 @@
+<!DOCTYPE html>
+<html lang="it">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GPS Tracker Map</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: #0f1117;
+      color: #e2e8f0;
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column
+    }
+
+    /* ── HEADER ── */
+    .header {
+      background: linear-gradient(135deg, #1a1f2e, #16213e);
+      border-bottom: 1px solid rgba(99, 102, 241, .2);
+      padding: 10px 18px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      z-index: 1000;
+      box-shadow: 0 2px 20px rgba(0, 0, 0, .4)
+    }
+
+    .header-icon {
+      width: 36px;
+      height: 36px;
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      flex-shrink: 0
+    }
+
+    .header-title {
+      font-size: 17px;
+      font-weight: 700;
+      background: linear-gradient(135deg, #818cf8, #a78bfa);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent
+    }
+
+    .header-sub {
+      font-size: 11px;
+      color: #475569;
+      margin-top: 1px
+    }
+
+    .header-right {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 8px
+    }
+
+    /* ── TABS ── */
+    .day-tabs {
+      display: flex;
+      gap: 3px;
+      background: rgba(255, 255, 255, .05);
+      padding: 3px;
+      border-radius: 10px
+    }
+
+    .day-tab {
+      padding: 5px 13px;
+      border-radius: 7px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      border: none;
+      background: transparent;
+      color: #64748b;
+      transition: all .2s;
+      font-family: inherit
+    }
+
+    .day-tab:hover {
+      color: #94a3b8;
+      background: rgba(255, 255, 255, .05)
+    }
+
+    .day-tab.active {
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      color: #fff;
+      box-shadow: 0 2px 10px rgba(99, 102, 241, .4)
+    }
+
+    /* ── ICON BUTTONS ── */
+    .icon-btn {
+      width: 34px;
+      height: 34px;
+      border-radius: 9px;
+      border: 1px solid rgba(255, 255, 255, .1);
+      background: rgba(255, 255, 255, .05);
+      color: #94a3b8;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 15px;
+      transition: all .2s
+    }
+
+    .icon-btn:hover {
+      background: rgba(99, 102, 241, .2);
+      color: #818cf8;
+      border-color: rgba(99, 102, 241, .3)
+    }
+
+    .icon-btn.spinning svg {
+      animation: spin .8s linear infinite
+    }
+
+    /* ── MAIN LAYOUT ── */
+    .main {
+      display: flex;
+      flex: 1;
+      overflow: hidden
+    }
+
+    /* ── SIDEBAR ── */
+    .sidebar {
+      width: 270px;
+      background: linear-gradient(180deg, #1a1f2e, #0f1117);
+      border-right: 1px solid rgba(255, 255, 255, .05);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+      padding: 14px;
+      gap: 10px
+    }
+
+    .sidebar::-webkit-scrollbar {
+      width: 3px
+    }
+
+    .sidebar::-webkit-scrollbar-thumb {
+      background: rgba(99, 102, 241, .3);
+      border-radius: 2px
+    }
+
+    /* ── STAT CARDS ── */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 7px
+    }
+
+    .stat-card {
+      background: rgba(255, 255, 255, .04);
+      border: 1px solid rgba(255, 255, 255, .07);
+      border-radius: 12px;
+      padding: 12px
+    }
+
+    .stat-icon {
+      font-size: 18px;
+      margin-bottom: 5px
+    }
+
+    .stat-label {
+      font-size: 10px;
+      color: #475569;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      margin-bottom: 3px
+    }
+
+    .stat-value {
+      font-size: 20px;
+      font-weight: 700;
+      color: #e2e8f0
+    }
+
+    .stat-value .unit {
+      font-size: 12px;
+      font-weight: 400;
+      color: #64748b
+    }
+
+    /* ── LEGEND ── */
+    .legend {
+      background: rgba(255, 255, 255, .04);
+      border: 1px solid rgba(255, 255, 255, .07);
+      border-radius: 12px;
+      padding: 12px
+    }
+
+    .legend-title {
+      font-size: 10px;
+      color: #475569;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      margin-bottom: 8px
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      color: #94a3b8;
+      margin-bottom: 5px
+    }
+
+    .legend-line {
+      width: 28px;
+      height: 3px;
+      border-radius: 2px;
+      flex-shrink: 0
+    }
+
+    /* ── TIMELINE ── */
+    .tl-title {
+      font-size: 10px;
+      color: #475569;
+      text-transform: uppercase;
+      letter-spacing: .5px
+    }
+
+    .timeline {
+      display: flex;
+      flex-direction: column
+    }
+
+    .tl-item {
+      display: flex;
+      gap: 10px;
+      padding: 9px 0 9px 14px;
+      border-left: 2px solid rgba(99, 102, 241, .25);
+      position: relative;
+      cursor: pointer;
+      transition: border-color .2s
+    }
+
+    .tl-item:hover {
+      border-left-color: #6366f1
+    }
+
+    .tl-item::before {
+      content: '';
+      width: 7px;
+      height: 7px;
+      background: #6366f1;
+      border-radius: 50%;
+      position: absolute;
+      left: -5px;
+      top: 13px;
+      box-shadow: 0 0 6px rgba(99, 102, 241, .5)
+    }
+
+    .tl-time {
+      font-size: 11px;
+      color: #475569;
+      min-width: 42px;
+      padding-top: 1px
+    }
+
+    .tl-desc {
+      font-size: 12px;
+      color: #94a3b8;
+      line-height: 1.4
+    }
+
+    /* ── MAP ── */
+    #map {
+      flex: 1;
+      background: #1a1f2e
+    }
+
+    .map-wrap {
+      position: relative;
+      flex: 1;
+      display: flex
+    }
+
+    /* ── OVERLAYS ── */
+    .loading {
+      position: absolute;
+      inset: 0;
+      background: rgba(15, 17, 23, .85);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 2000;
+      gap: 14px
+    }
+
+    .spinner {
+      width: 44px;
+      height: 44px;
+      border: 3px solid rgba(99, 102, 241, .2);
+      border-top-color: #6366f1;
+      border-radius: 50%;
+      animation: spin .8s linear infinite
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg)
+      }
+    }
+
+    .loading-text {
+      color: #64748b;
+      font-size: 13px
+    }
+
+    .no-data {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+      z-index: 500;
+      pointer-events: none;
+      display: none
+    }
+
+    .no-data-icon {
+      font-size: 44px;
+      opacity: .25;
+      margin-bottom: 10px
+    }
+
+    .no-data-text {
+      font-size: 13px;
+      color: #475569
+    }
+
+    /* ── MODAL ── */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, .75);
+      backdrop-filter: blur(5px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 3000
+    }
+
+    .modal-overlay.active {
+      display: flex
+    }
+
+    .modal {
+      background: linear-gradient(135deg, #1a1f2e, #16213e);
+      border: 1px solid rgba(99, 102, 241, .25);
+      border-radius: 18px;
+      padding: 26px;
+      width: 430px;
+      max-width: 95vw;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, .5)
+    }
+
+    .modal-title {
+      font-size: 17px;
+      font-weight: 700;
+      color: #e2e8f0;
+      margin-bottom: 4px
+    }
+
+    .modal-sub {
+      font-size: 12px;
+      color: #64748b;
+      line-height: 1.7;
+      margin-bottom: 20px
+    }
+
+    .modal-sub a {
+      color: #818cf8;
+      text-decoration: none
+    }
+
+    .form-group {
+      margin-bottom: 14px
+    }
+
+    .form-label {
+      display: block;
+      font-size: 11px;
+      font-weight: 500;
+      color: #94a3b8;
+      margin-bottom: 5px
+    }
+
+    .form-input {
+      width: 100%;
+      padding: 9px 13px;
+      background: rgba(255, 255, 255, .06);
+      border: 1px solid rgba(255, 255, 255, .1);
+      border-radius: 9px;
+      color: #e2e8f0;
+      font-size: 13px;
+      font-family: inherit;
+      outline: none;
+      transition: all .2s
+    }
+
+    .form-input:focus {
+      border-color: rgba(99, 102, 241, .5);
+      background: rgba(99, 102, 241, .06);
+      box-shadow: 0 0 0 3px rgba(99, 102, 241, .1)
+    }
+
+    .form-hint {
+      font-size: 10px;
+      color: #475569;
+      margin-top: 3px
+    }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px
+    }
+
+    .modal-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 20px
+    }
+
+    .btn {
+      flex: 1;
+      padding: 10px;
+      border-radius: 9px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: all .2s;
+      font-family: inherit
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      color: #fff;
+      box-shadow: 0 4px 15px rgba(99, 102, 241, .3)
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 20px rgba(99, 102, 241, .4)
+    }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, .05);
+      color: #94a3b8;
+      border: 1px solid rgba(255, 255, 255, .1)
+    }
+
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, .08)
+    }
+
+    .error-msg {
+      background: rgba(239, 68, 68, .1);
+      border: 1px solid rgba(239, 68, 68, .2);
+      border-radius: 8px;
+      padding: 10px;
+      font-size: 12px;
+      color: #f87171;
+      display: none;
+      margin-bottom: 12px
+    }
+
+    /* ── LEAFLET OVERRIDES ── */
+    .leaflet-popup-content-wrapper {
+      background: #1a1f2e !important;
+      border: 1px solid rgba(99, 102, 241, .25) !important;
+      color: #e2e8f0 !important;
+      border-radius: 12px !important;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, .5) !important
+    }
+
+    .leaflet-popup-tip {
+      background: #1a1f2e !important
+    }
+
+    .leaflet-popup-content {
+      font-family: 'Inter', sans-serif;
+      font-size: 13px;
+      line-height: 1.6
+    }
+
+    .leaflet-popup-content b {
+      color: #a78bfa
+    }
+
+    .custom-tooltip {
+      background: #1a1f2e !important;
+      border: 1px solid rgba(99, 102, 241, .3) !important;
+      border-radius: 6px !important;
+      padding: 5px 9px !important;
+      font-family: 'Inter', sans-serif !important;
+      font-size: 11px !important;
+      color: #e2e8f0 !important;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, .3) !important
+    }
+
+    .custom-tooltip::before {
+      display: none !important
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- Loading -->
+  <div class="loading" id="loading">
+    <div class="spinner"></div>
+    <span class="loading-text">Caricamento percorsi GPS...</span>
+  </div>
+
+  <!-- Settings Modal -->
+  <div class="modal-overlay" id="settingsModal">
+    <div class="modal">
+      <div class="modal-title">⚙️ Configurazione</div>
+      <div class="modal-sub">
+        Inserisci il tuo <strong style="color:#a78bfa">Long-Lived Access Token</strong> di Home Assistant.<br>
+        <a href="#" onclick="openProfilePage()">Come generarlo: Profilo HA → Token di accesso →</a>
+      </div>
+      <div class="error-msg" id="errMsg"></div>
+      <div class="form-group">
+        <label class="form-label">URL di Home Assistant</label>
+        <input class="form-input" id="cfgUrl" placeholder="http://homeassistant.local:8123" />
+        <span class="form-hint">L'indirizzo con cui accedi a HA</span>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Long-Lived Access Token</label>
+        <input class="form-input" id="cfgToken" type="password" placeholder="eyJ0eXAiOiJKV1Qi..." />
+        <span class="form-hint">Profilo → Sicurezza → Token di accesso di lunga durata</span>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Entity ID Device Tracker</label>
+        <input class="form-input" id="cfgEntity" placeholder="device_tracker.il_mio_telefono" />
+        <span class="form-hint">Visibile in HA → Impostazioni → Entità</span>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Giorni di storico</label>
+          <input class="form-input" id="cfgDays" type="number" value="3" min="1" max="30" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Intervallo refresh (min)</label>
+          <input class="form-input" id="cfgRefresh" type="number" value="5" min="1" max="60" />
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="closeSettings()">Annulla</button>
+        <button class="btn btn-primary" onclick="saveSettings()">💾 Salva e carica mappa</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-icon">📍</div>
+    <div>
+      <div class="header-title">GPS Tracker Map</div>
+      <div class="header-sub" id="headerSub">Configura le impostazioni per iniziare</div>
+    </div>
+    <div class="header-right">
+      <div class="day-tabs" id="dayTabs"></div>
+      <button class="icon-btn" id="btnRefresh" onclick="doRefresh()" title="Aggiorna dati">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+          <path d="M23 4v6h-6M1 20v-6h6" />
+          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+        </svg>
+      </button>
+      <button class="icon-btn" onclick="openSettings()" title="Impostazioni">⚙️</button>
+    </div>
+  </div>
+
+  <!-- Main -->
+  <div class="main">
+    <!-- Sidebar -->
+    <div class="sidebar">
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-icon">📏</div>
+          <div class="stat-label">Distanza</div>
+          <div class="stat-value" id="sD">--<span class="unit"> km</span></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">⏱️</div>
+          <div class="stat-label">Durata</div>
+          <div class="stat-value" id="sH">--<span class="unit"> h</span></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">📍</div>
+          <div class="stat-label">Punti GPS</div>
+          <div class="stat-value" id="sP">--</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">🚗</div>
+          <div class="stat-label">Max velocità</div>
+          <div class="stat-value" id="sV">--<span class="unit"> km/h</span></div>
+        </div>
+      </div>
+
+      <div class="legend">
+        <div class="legend-title">Velocità percorso</div>
+        <div class="legend-item">
+          <div class="legend-line" style="background:#818cf8"></div>A piedi (&lt;5 km/h)
+        </div>
+        <div class="legend-item">
+          <div class="legend-line" style="background:#34d399"></div>Lento (&lt;30 km/h)
+        </div>
+        <div class="legend-item">
+          <div class="legend-line" style="background:#f59e0b"></div>Auto (&lt;80 km/h)
+        </div>
+        <div class="legend-item">
+          <div class="legend-line" style="background:#ef4444"></div>Veloce (&gt;80 km/h)
+        </div>
+        <div class="legend-item">
+          <div style="width:28px;height:10px;border-radius:50%;background:#f59e0b;flex-shrink:0"></div>Punto di sosta
+        </div>
+      </div>
+
+      <div class="tl-title">Cronologia</div>
+      <div class="timeline" id="timeline">
+        <div style="color:#475569;font-size:12px;padding:8px 0">Configura le impostazioni ⬆️</div>
+      </div>
+    </div>
+
+    <!-- Map -->
+    <div class="map-wrap">
+      <div id="map"></div>
+      <div class="no-data" id="noData">
+        <div class="no-data-icon">🗺️</div>
+        <div class="no-data-text">Nessun dato GPS trovato per questo periodo.<br>Verifica che l'app HA Companion invii
+          la posizione.</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+  <script>
+    // ─── CONFIG ───────────────────────────────────────────
+    let cfg = { url: '', token: '', entity: '', days: 3, refresh: 5 };
+    let map, clusterGroup;
+    let allData = {};   // { 'DD/MM/YYYY': [point,...] }
+    let activeLayers = [];
+    let refreshTimer = null;
+
+    // ─── INIT ─────────────────────────────────────────────
+    window.addEventListener('DOMContentLoaded', () => {
+      initMap();
+      loadConfig();
+    });
+
+    function initMap() {
+      map = L.map('map', { center: [41.9, 12.5], zoom: 6 });
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; OpenStreetMap &copy; CARTO',
+        subdomains: 'abcd', maxZoom: 20
+      }).addTo(map);
+      clusterGroup = L.markerClusterGroup({ maxClusterRadius: 50, disableClusteringAtZoom: 16 });
+      map.addLayer(clusterGroup);
+    }
+
+    function loadConfig() {
+      const saved = localStorage.getItem('ha_gps_tracker_cfg');
+      if (saved) {
+        try {
+          cfg = { ...cfg, ...JSON.parse(saved) };
+          if (cfg.token && cfg.entity) { loadData(); return; }
+        } catch (_) { }
+      }
+      // Pre-fill URL from page origin
+      cfg.url = window.location.origin;
+      setLoading(false);
+      openSettings();
+    }
+
+    // ─── SETTINGS ─────────────────────────────────────────
+    function openSettings() {
+      document.getElementById('cfgUrl').value = cfg.url || window.location.origin;
+      document.getElementById('cfgToken').value = cfg.token || '';
+      document.getElementById('cfgEntity').value = cfg.entity || '';
+      document.getElementById('cfgDays').value = cfg.days || 3;
+      document.getElementById('cfgRefresh').value = cfg.refresh || 5;
+      document.getElementById('settingsModal').classList.add('active');
+    }
+    function closeSettings() {
+      document.getElementById('settingsModal').classList.remove('active');
+    }
+    function saveSettings() {
+      const url = document.getElementById('cfgUrl').value.trim().replace(/\/$/, '');
+      const token = document.getElementById('cfgToken').value.trim();
+      const entity = document.getElementById('cfgEntity').value.trim();
+      const days = parseInt(document.getElementById('cfgDays').value) || 3;
+      const refresh = parseInt(document.getElementById('cfgRefresh').value) || 5;
+      if (!token || !entity) { showErr('Token ed Entity ID sono obbligatori!'); return; }
+      cfg = { url, token, entity, days, refresh };
+      localStorage.setItem('ha_gps_tracker_cfg', JSON.stringify(cfg));
+      closeSettings();
+      loadData();
+    }
+    function showErr(msg) {
+      const el = document.getElementById('errMsg');
+      el.textContent = msg; el.style.display = 'block';
+      setTimeout(() => el.style.display = 'none', 5000);
+    }
+    function openProfilePage() {
+      window.open((cfg.url || window.location.origin) + '/profile', '_blank');
+    }
+
+    // ─── DATA LOADING ─────────────────────────────────────
+    async function loadData() {
+      setLoading(true);
+      clearRefreshTimer();
+      try {
+        const end = new Date();
+        const start = new Date(end - cfg.days * 86400000);
+        const apiUrl = `${cfg.url}/api/history/period/${start.toISOString()}` +
+          `?filter_entity_id=${cfg.entity}&end_time=${end.toISOString()}`;
+        const res = await fetch(apiUrl, {
+          headers: { 'Authorization': `Bearer ${cfg.token}` }
+        });
+        if (!res.ok) {
+          if (res.status === 401) throw new Error('Token non valido. Aprire le impostazioni e rigenerare il token.');
+          if (res.status === 404) throw new Error(`Entità "${cfg.entity}" non trovata in HA.`);
+          throw new Error(`Errore HTTP ${res.status}`);
+        }
+        const json = await res.json();
+        const states = json[0] || [];
+        processStates(states);
+        scheduleRefresh();
+      } catch (e) {
+        setLoading(false);
+        document.getElementById('noData').style.display = 'block';
+        document.querySelector('.no-data-text').textContent = '⚠️ ' + e.message;
+        document.getElementById('noData').style.display = 'block';
+        console.error(e);
+      }
+    }
+
+    function processStates(states) {
+      allData = {};
+      const points = states
+        .filter(s => s.attributes?.latitude && s.attributes?.longitude)
+        .map(s => ({
+          lat: parseFloat(s.attributes.latitude),
+          lng: parseFloat(s.attributes.longitude),
+          acc: s.attributes.gps_accuracy || 0,
+          time: new Date(s.last_updated),
+          speed: 0, dist: 0
+        }));
+
+      if (!points.length) {
+        setLoading(false);
+        document.getElementById('noData').style.display = 'block';
+        return;
+      }
+      document.getElementById('noData').style.display = 'none';
+
+      // Speed calculation
+      for (let i = 1; i < points.length; i++) {
+        const d = haversine(points[i - 1].lat, points[i - 1].lng, points[i].lat, points[i].lng);
+        const dt = (points[i].time - points[i - 1].time) / 3600000;
+        points[i].dist = d;
+        points[i].speed = dt > 0 ? Math.min(d / dt, 300) : 0;
+      }
+
+      // Group by day
+      points.forEach(p => {
+        const k = p.time.toLocaleDateString('it-IT');
+        (allData[k] = allData[k] || []).push(p);
+      });
+
+      // Update header
+      document.getElementById('headerSub').textContent = cfg.entity;
+
+      buildDayTabs();
+      // Select the most recent day
+      const sorted = sortedDays();
+      selectDay(sorted[0]);
+      setLoading(false);
+    }
+
+    // ─── TABS ─────────────────────────────────────────────
+    function sortedDays() {
+      return Object.keys(allData).sort((a, b) => {
+        const parse = s => { const [d, m, y] = s.split('/'); return new Date(y, m - 1, d); };
+        return parse(b) - parse(a);
+      });
+    }
+
+    function buildDayTabs() {
+      const cont = document.getElementById('dayTabs');
+      cont.innerHTML = '';
+      const today = new Date().toLocaleDateString('it-IT');
+      const yest = new Date(Date.now() - 86400000).toLocaleDateString('it-IT');
+
+      // All tab
+      const allBtn = makeTab('all', 'Tutti');
+      cont.appendChild(allBtn);
+
+      sortedDays().forEach(day => {
+        let label = day;
+        if (day === today) label = 'Oggi';
+        else if (day === yest) label = 'Ieri';
+        else { const [d, m] = day.split('/'); label = `${d}/${m}`; }
+        cont.appendChild(makeTab(day, label));
+      });
+    }
+
+    function makeTab(day, label) {
+      const b = document.createElement('button');
+      b.className = 'day-tab'; b.dataset.day = day; b.textContent = label;
+      b.onclick = () => selectDay(day);
+      return b;
+    }
+
+    function selectDay(day) {
+      document.querySelectorAll('.day-tab').forEach(t => t.classList.toggle('active', t.dataset.day === day));
+      let pts;
+      if (day === 'all') {
+        pts = Object.values(allData).flat().sort((a, b) => a.time - b.time);
+      } else {
+        pts = allData[day] || [];
+      }
+      drawMap(pts);
+      updateStats(pts);
+      updateTimeline(pts);
+    }
+
+    // ─── MAP ──────────────────────────────────────────────
+    function drawMap(pts) {
+      activeLayers.forEach(l => map.removeLayer(l));
+      activeLayers = [];
+      clusterGroup.clearLayers();
+
+      if (!pts.length) { document.getElementById('noData').style.display = 'block'; return; }
+      document.getElementById('noData').style.display = 'none';
+
+      // Colored polyline segments
+      for (let i = 1; i < pts.length; i++) {
+        const seg = L.polyline(
+          [[pts[i - 1].lat, pts[i - 1].lng], [pts[i].lat, pts[i].lng]],
+          { color: speedColor(pts[i].speed), weight: 4, opacity: .85 }
+        );
+        seg.bindTooltip(
+          `${fTime(pts[i].time)}  ·  ${pts[i].speed.toFixed(0)} km/h`,
+          { className: 'custom-tooltip', sticky: true }
+        );
+        seg.addTo(map);
+        activeLayers.push(seg);
+      }
+
+      // Start marker
+      addCircle(pts[0].lat, pts[0].lng, '#22c55e',
+        `<b>🟢 Partenza</b><br>${fDT(pts[0].time)}`).addTo(map);
+
+      // End marker
+      const last = pts[pts.length - 1];
+      addCircle(last.lat, last.lng, '#ef4444',
+        `<b>🔴 Ultima posizione</b><br>${fDT(last.time)}`).addTo(map);
+
+      // Stops
+      detectStops(pts).forEach(s => {
+        const m = addCircle(s.lat, s.lng, '#f59e0b',
+          `<b>⏸️ Sosta</b><br>${fTime(s.from)} → ${fTime(s.to)}<br>Durata: ${fDur((s.to - s.from) / 60000)}`);
+        clusterGroup.addLayer(m);
+      });
+
+      // Fit
+      map.fitBounds(L.latLngBounds(pts.map(p => [p.lat, p.lng])), { padding: [50, 50] });
+    }
+
+    function addCircle(lat, lng, color, popup) {
+      const m = L.circleMarker([lat, lng], {
+        radius: 9, fillColor: color, color: '#fff', weight: 2,
+        opacity: 1, fillOpacity: 1
+      }).bindPopup(popup);
+      activeLayers.push(m);
+      return m;
+    }
+
+    function speedColor(s) {
+      if (s < 5) return '#818cf8';
+      if (s < 30) return '#34d399';
+      if (s < 80) return '#f59e0b';
+      return '#ef4444';
+    }
+
+    function detectStops(pts, minMs = 5 * 60 * 1000) {
+      const stops = []; let start = null, latS = 0, lngS = 0, cnt = 0;
+      pts.forEach((p, i) => {
+        if (p.speed < 3) {
+          if (!start) { start = p.time; latS = lngS = 0; cnt = 0; }
+          latS += p.lat; lngS += p.lng; cnt++;
+        } else if (start) {
+          if (p.time - start >= minMs)
+            stops.push({ lat: latS / cnt, lng: lngS / cnt, from: start, to: p.time });
+          start = null;
+        }
+      });
+      return stops;
+    }
+
+    // ─── STATS ────────────────────────────────────────────
+    function updateStats(pts) {
+      if (!pts.length) { ['sD', 'sH', 'sP', 'sV'].forEach(id => document.getElementById(id).textContent = '--'); return; }
+      let dist = 0, maxV = 0;
+      pts.forEach(p => { dist += p.dist || 0; if (p.speed > maxV) maxV = p.speed; });
+      const dur = (pts[pts.length - 1].time - pts[0].time) / 3600000;
+      document.getElementById('sD').innerHTML = `${dist.toFixed(1)}<span class="unit"> km</span>`;
+      document.getElementById('sH').innerHTML = `${dur.toFixed(1)}<span class="unit"> h</span>`;
+      document.getElementById('sP').textContent = pts.length;
+      document.getElementById('sV').innerHTML = `${maxV.toFixed(0)}<span class="unit"> km/h</span>`;
+    }
+
+    // ─── TIMELINE ─────────────────────────────────────────
+    function updateTimeline(pts) {
+      const el = document.getElementById('timeline');
+      el.innerHTML = '';
+      if (!pts.length) { el.innerHTML = '<div style="color:#475569;font-size:12px">Nessun dato</div>'; return; }
+
+      const events = [{ time: pts[0].time, label: '🟢 Partenza', lat: pts[0].lat, lng: pts[0].lng }];
+      detectStops(pts).forEach(s => events.push({
+        time: s.from, label: `⏸️ Sosta — ${fDur((s.to - s.from) / 60000)} min`, lat: s.lat, lng: s.lng
+      }));
+      events.push({ time: pts[pts.length - 1].time, label: '🔴 Ultima posizione', lat: pts[pts.length - 1].lat, lng: pts[pts.length - 1].lng });
+      events.sort((a, b) => a.time - b.time);
+
+      events.forEach(ev => {
+        const d = document.createElement('div');
+        d.className = 'tl-item';
+        d.innerHTML = `<span class="tl-time">${fTime(ev.time)}</span><span class="tl-desc">${ev.label}</span>`;
+        d.onclick = () => map.setView([ev.lat, ev.lng], 17);
+        el.appendChild(d);
+      });
+    }
+
+    // ─── HELPERS ──────────────────────────────────────────
+    function haversine(la1, lo1, la2, lo2) {
+      const R = 6371, r = Math.PI / 180;
+      const dLa = (la2 - la1) * r, dLo = (lo2 - lo1) * r;
+      const a = Math.sin(dLa / 2) ** 2 + Math.cos(la1 * r) * Math.cos(la2 * r) * Math.sin(dLo / 2) ** 2;
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+    function fTime(d) { return d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }); }
+    function fDT(d) { return d.toLocaleString('it-IT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); }
+    function fDur(min) { return min < 60 ? `${Math.round(min)}` : `${Math.floor(min / 60)}h ${Math.round(min % 60)}m`; }
+    function setLoading(v) { document.getElementById('loading').style.display = v ? 'flex' : 'none'; }
+
+    async function doRefresh() {
+      const btn = document.getElementById('btnRefresh');
+      btn.classList.add('spinning');
+      await loadData();
+      btn.classList.remove('spinning');
+    }
+    function scheduleRefresh() {
+      clearRefreshTimer();
+      refreshTimer = setTimeout(loadData, cfg.refresh * 60000);
+    }
+    function clearRefreshTimer() {
+      if (refreshTimer) { clearTimeout(refreshTimer); refreshTimer = null; }
+    }
+  </script>
+</body>
+
+</html>
