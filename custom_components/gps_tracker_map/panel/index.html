@@ -551,6 +551,21 @@
     .custom-tooltip::before {
       display: none !important
     }
+
+    /* ── REAL-TIME PULSE DOT ── */
+    .rt-pulse {
+      width: 16px; height: 16px;
+      background: #3b82f6;
+      border: 2px solid #fff;
+      border-radius: 50%;
+      box-shadow: 0 0 0 0 rgba(59,130,246,.6);
+      animation: rt-ring 1.4s ease-out infinite;
+    }
+    @keyframes rt-ring {
+      0%   { box-shadow: 0 0 0 0 rgba(59,130,246,.6) }
+      70%  { box-shadow: 0 0 0 14px rgba(59,130,246,0) }
+      100% { box-shadow: 0 0 0 0 rgba(59,130,246,0) }
+    }
   </style>
 </head>
 
@@ -697,6 +712,7 @@
     let map, clusterGroup;
     let allData = {};   // { 'DD/MM/YYYY': [point,...] }
     let activeLayers = [];
+    let realtimeLayer = null;  // blue pulsing dot — current real-time position
     let refreshTimer = null;
 
     // ─── INIT ─────────────────────────────────────────────
@@ -866,6 +882,7 @@
         dist: 0
       }));
       processPoints(points.sort((a, b) => a.time - b.time));
+      fetchRealtimePosition(); // also show current real-time dot
     }
 
     // Build GPS points from separate lat/lng sensor history
@@ -926,6 +943,7 @@
       buildDayTabs();
       selectDay(sortedDays()[0]);
       setLoading(false);
+      fetchRealtimePosition(); // overlay current real-time position
     }
 
     function showLowDataHint(count) {
@@ -940,6 +958,45 @@
         '3. Abilita <b>"Posizione in background"</b><br>' +
         '4. Oppure in HA: <b>Impostazioni → Sistema → Registratore</b><br>' +
         '   aggiungi <code>device_tracker</code> agli attributi registrati';
+      fetchRealtimePosition(); // always show real-time position even without history
+    }
+
+    // ─── REAL-TIME POSITION ───────────────────────────────
+    async function fetchRealtimePosition() {
+      if (!cfg.entity) return;
+      try {
+        const res = await haFetch(`${cfg.url}/api/states/${encodeURIComponent(cfg.entity)}`);
+        if (!res.ok) return;
+        const state = await res.json();
+        const lat = parseFloat(state.attributes?.latitude);
+        const lng = parseFloat(state.attributes?.longitude);
+        if (isNaN(lat) || isNaN(lng)) return;
+
+        // Remove old real-time layer
+        if (realtimeLayer) { map.removeLayer(realtimeLayer); realtimeLayer = null; }
+
+        // Pulsing blue circle for current position
+        const icon = L.divIcon({
+          className: '',
+          html: '<div class="rt-pulse"></div>',
+          iconSize: [20, 20],
+          iconAnchor: [10, 10]
+        });
+        realtimeLayer = L.marker([lat, lng], { icon, zIndexOffset: 1000 })
+          .bindPopup(
+            `<b style="color:#60a5fa">📡 Posizione attuale</b><br>
+             Stato: <b>${state.state}</b><br>
+             Aggiornata: ${fDT(new Date(state.last_updated))}<br>
+             Precisione: ${state.attributes?.gps_accuracy ?? '?'} m`
+          )
+          .addTo(map);
+
+        // Zoom to real-time position if no history visible
+        if (!activeLayers.length) {
+          map.setView([lat, lng], 16);
+          document.getElementById('noData').style.display = 'none';
+        }
+      } catch (_) {}
     }
 
     // ─── TABS ─────────────────────────────────────────────
