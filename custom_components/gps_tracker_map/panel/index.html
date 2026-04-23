@@ -814,14 +814,25 @@
       setLoading(true);
       clearRefreshTimer();
       try {
+        // 1) Try our own GPS history DB first (plugin polls every minute)
+        const dbRes = await fetch(
+          `/api/gps_tracker_map/history?entity_id=${encodeURIComponent(cfg.entity)}&days=${cfg.days}`,
+          { headers: { 'Authorization': `Bearer ${cfg.token}` } }
+        );
+        if (dbRes.ok) {
+          const rows = await dbRes.json();
+          if (rows.length >= 2) {
+            processFromCustomDb(rows);
+            scheduleRefresh();
+            return;
+          }
+        }
+
+        // 2) Fallback: HA History API (only has zone transitions)
         const end = new Date();
         const start = new Date(end - cfg.days * 86400000);
-        const startIso = start.toISOString();
-        const endIso = end.toISOString();
-
-        // 1) Query device_tracker history
         const res = await fetch(
-          `${cfg.url}/api/history/period/${startIso}?filter_entity_id=${cfg.entity}&end_time=${endIso}&significant_changes_only=false&minimal_response=false`,
+          `${cfg.url}/api/history/period/${start.toISOString()}?filter_entity_id=${cfg.entity}&end_time=${end.toISOString()}&significant_changes_only=false&minimal_response=false`,
           { headers: { 'Authorization': `Bearer ${cfg.token}` } }
         );
         if (!res.ok) {
@@ -832,32 +843,7 @@
         const json = await res.json();
         const states = json[0] || [];
         const gpsStates = states.filter(s => s.attributes?.latitude && s.attributes?.longitude);
-
-        // 2) If very few GPS points, try latitude/longitude sensor entities (HA Companion creates these)
-        if (gpsStates.length < 3) {
-          const baseName = cfg.entity.replace('device_tracker.', '');
-          const latEnt = `sensor.${baseName}_latitude`;
-          const lngEnt = `sensor.${baseName}_longitude`;
-          try {
-            const sRes = await fetch(
-              `${cfg.url}/api/history/period/${startIso}?filter_entity_id=${latEnt},${lngEnt}&end_time=${endIso}&significant_changes_only=false&minimal_response=false`,
-              { headers: { 'Authorization': `Bearer ${cfg.token}` } }
-            );
-            if (sRes.ok) {
-              const sData = await sRes.json();
-              const latHist = (sData.find(a => a[0]?.entity_id === latEnt) || []).filter(s => !isNaN(parseFloat(s.state)));
-              const lngHist = (sData.find(a => a[0]?.entity_id === lngEnt) || []).filter(s => !isNaN(parseFloat(s.state)));
-              if (latHist.length > 2 && lngHist.length > 2) {
-                processFromSensors(latHist, lngHist);
-                scheduleRefresh();
-                return;
-              }
-            }
-          } catch (_) {}
-          // Show low-data hint
-          showLowDataHint(gpsStates.length);
-        }
-
+        if (gpsStates.length < 2) showLowDataHint(gpsStates.length);
         processStates(gpsStates);
         scheduleRefresh();
       } catch (e) {
@@ -866,6 +852,19 @@
         document.querySelector('.no-data-text').textContent = '⚠️ ' + e.message;
         console.error(e);
       }
+    }
+
+    // Build points from our custom SQLite DB response
+    function processFromCustomDb(rows) {
+      const points = rows.map(r => ({
+        lat: r.latitude,
+        lng: r.longitude,
+        acc: r.accuracy || 0,
+        time: new Date(r.timestamp.endsWith('Z') ? r.timestamp : r.timestamp + 'Z'),
+        speed: 0,
+        dist: 0
+      }));
+      processPoints(points.sort((a, b) => a.time - b.time));
     }
 
     // Build GPS points from separate lat/lng sensor history
