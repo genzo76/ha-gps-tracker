@@ -787,9 +787,19 @@
         try { cfg = { ...cfg, ...JSON.parse(saved) }; } catch (_) { }
       }
       cfg.url = window.location.origin;
-      // Always try to load — session cookie handles auth automatically
       setLoading(true);
-      loadTrackers();
+      addLog('loadConfig: avvio...');
+
+      // Safety watchdog — if still loading after 10s, stop and open settings
+      const watchdog = setTimeout(() => {
+        if (document.getElementById('loading').style.display !== 'none') {
+          addLog('⏱️ watchdog: timeout 10s — forzo stop loading');
+          setLoading(false);
+          openSettings();
+        }
+      }, 10000);
+
+      loadTrackers().finally(() => clearTimeout(watchdog));
     }
 
     // ─── SETTINGS ─────────────────────────────────────────
