@@ -991,13 +991,24 @@
           )
           .addTo(map);
 
-        // Zoom to real-time position if no history visible
-        if (!activeLayers.length) {
+        // Fit map to include BOTH real-time position AND historical points
+        const allLatLngs = [[lat, lng]];
+        activeLayers.forEach(l => {
+          try {
+            if (l.getLatLng) { const ll = l.getLatLng(); allLatLngs.push([ll.lat, ll.lng]); }
+            else if (l.getLatLngs) l.getLatLngs().flat().forEach(ll => allLatLngs.push([ll.lat, ll.lng]));
+          } catch (_) {}
+        });
+
+        if (allLatLngs.length === 1) {
           map.setView([lat, lng], 16);
           document.getElementById('noData').style.display = 'none';
+        } else {
+          map.fitBounds(L.latLngBounds(allLatLngs), { padding: [60, 60] });
         }
       } catch (_) {}
     }
+
 
     // ─── TABS ─────────────────────────────────────────────
     function sortedDays() {
