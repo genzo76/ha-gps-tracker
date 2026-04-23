@@ -566,6 +566,34 @@
       70%  { box-shadow: 0 0 0 14px rgba(59,130,246,0) }
       100% { box-shadow: 0 0 0 0 rgba(59,130,246,0) }
     }
+
+    /* ── MOBILE RESPONSIVE ── */
+    .mob-bar {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      background: #1a1f2e;
+      border-bottom: 1px solid rgba(99,102,241,.2);
+    }
+    .mob-bar .tracker-select { flex: 1; display: block !important; }
+    .mob-bar .icon-btn { flex-shrink: 0; }
+    .hamburger-btn {
+      background: none; border: none; cursor: pointer;
+      color: #a78bfa; padding: 4px 8px; font-size: 20px;
+      line-height: 1; border-radius: 6px;
+    }
+    .hamburger-btn:hover { background: rgba(167,139,250,.15); }
+
+    @media (max-width: 640px) {
+      .header { flex-wrap: wrap; padding: 8px 10px; gap: 6px; }
+      .header-right { display: none !important; } /* move to mob-bar */
+      .mob-bar { display: flex; }
+      .sidebar { display: none; width: 0; }
+      .sidebar.mob-open { display: flex; flex-direction: column; width: 100%; position: absolute; z-index: 500; top: 0; left: 0; height: 100%; overflow-y: auto; }
+      .main { flex-direction: column; }
+      .map-wrap { height: calc(100vh - 110px); }
+    }
   </style>
 </head>
 
@@ -622,7 +650,7 @@
   <!-- Header -->
   <div class="header">
     <div class="header-icon">📍</div>
-    <div>
+    <div style="flex:1;min-width:0">
       <div class="header-title">GPS Tracker Map</div>
       <div class="header-sub" id="headerSub">Configura le impostazioni per iniziare</div>
     </div>
@@ -639,6 +667,16 @@
       </button>
       <button class="icon-btn" onclick="openSettings()" title="Impostazioni">⚙️</button>
     </div>
+  </div>
+
+  <!-- Mobile bar (visible only on small screens) -->
+  <div class="mob-bar">
+    <button class="hamburger-btn" onclick="toggleMobSidebar()" title="Statistiche e cronologia">☰</button>
+    <select class="tracker-select" id="trackerSelectMob" title="Seleziona tracker" onchange="onTrackerChange(this.value)" style="display:none">
+      <option value="">— Seleziona tracker —</option>
+    </select>
+    <button class="icon-btn" onclick="doRefresh()" title="Aggiorna">🔄</button>
+    <button class="icon-btn" onclick="openSettings()" title="Impostazioni">⚙️</button>
   </div>
 
   <!-- Main -->
@@ -714,6 +752,7 @@
     let activeLayers = [];
     let realtimeLayer = null;  // blue pulsing dot — current real-time position
     let refreshTimer = null;
+    let realtimeTimer = null; // 60-second real-time position updater
 
     // ─── INIT ─────────────────────────────────────────────
     window.addEventListener('DOMContentLoaded', () => {
@@ -807,6 +846,7 @@
           sel.appendChild(opt);
         });
         sel.style.display = trackers.length ? 'block' : 'none';
+        syncMobSelect(trackers, cfg.entity); // keep mobile select in sync
 
         // if we already have entity configured, load it; else pick first
         if (!cfg.entity && trackers.length) {
@@ -1186,9 +1226,31 @@
     function scheduleRefresh() {
       clearRefreshTimer();
       refreshTimer = setTimeout(loadData, cfg.refresh * 60000);
+      // Real-time position dot: refresh every 60s independently
+      realtimeTimer = setInterval(fetchRealtimePosition, 60000);
     }
     function clearRefreshTimer() {
       if (refreshTimer) { clearTimeout(refreshTimer); refreshTimer = null; }
+      if (realtimeTimer) { clearInterval(realtimeTimer); realtimeTimer = null; }
+    }
+
+    // ─── MOBILE HELPERS ───────────────────────────────────
+    function toggleMobSidebar() {
+      document.querySelector('.sidebar').classList.toggle('mob-open');
+    }
+    // Keep desktop and mobile tracker selects in sync
+    function syncMobSelect(trackers, currentEntity) {
+      const mob = document.getElementById('trackerSelectMob');
+      mob.innerHTML = '<option value="">— Seleziona tracker —</option>';
+      trackers.forEach(t => {
+        const opt = document.createElement('option');
+        opt.value = t.entity_id;
+        opt.textContent = (t.attributes.friendly_name || t.entity_id)
+          + (t.state && t.state !== 'unknown' ? ` (${t.state})` : '');
+        if (t.entity_id === currentEntity) opt.selected = true;
+        mob.appendChild(opt);
+      });
+      mob.style.display = trackers.length ? 'block' : 'none';
     }
   </script>
 </body>
