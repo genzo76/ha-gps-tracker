@@ -1,6 +1,5 @@
 {
   "name": "GPS Tracker Map",
   "content_in_root": false,
-  "render_readme": true,
-  "filename": "gps_tracker_map.zip"
+  "render_readme": true
 }
