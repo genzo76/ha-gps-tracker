@@ -1207,10 +1207,42 @@
       }
 
       // Group by day
+      const todayStr = new Date().toLocaleDateString('it-IT');
+      allData[todayStr] = []; // Forza esistenza del giorno odierno in mappa
+
       points.forEach(p => {
         const k = p.time.toLocaleDateString('it-IT');
         (allData[k] = allData[k] || []).push(p);
       });
+
+      // CROSS-MIDNIGHT CONTINUITY RECOVERY
+      // Clona l'ultimo punto del giorno precedente alle 00:00 del giorno successivo
+      // se l'utente è rimasto fermo e non ha inviato ping durante il passaggio di mezzanotte.
+      const dayKeys = Object.keys(allData).sort((a, b) => {
+        const parse = s => { const [d, m, y] = s.split('/'); return new Date(y, m - 1, d); };
+        return parse(a) - parse(b);
+      });
+      
+      for (let i = 1; i < dayKeys.length; i++) {
+         const prevDayPts = allData[dayKeys[i-1]];
+         const currDayPts = allData[dayKeys[i]];
+         
+         if (prevDayPts.length > 0) {
+            const lastPrev = prevDayPts[prevDayPts.length - 1];
+            const [d, m, y] = dayKeys[i].split('/');
+            const midnight = new Date(y, m - 1, d, 0, 0, 0); // Mezzanotte esatta
+            
+            // Se non ci sono punti oggi, o il primo punto è avvenuto ben oltre la mezzanotte:
+            if (!currDayPts.length || currDayPts[0].time > new Date(midnight.getTime() + 60000)) {
+                currDayPts.unshift({
+                   ...lastPrev,
+                   time: midnight,
+                   timeOut: currDayPts.length ? new Date(currDayPts[0].time.getTime() - 60000) : new Date(),
+                   speed: 0
+                });
+            }
+         }
+      }
 
       document.getElementById('headerSub').textContent = cfg.entity;
       buildDayTabs();
@@ -1407,6 +1439,22 @@
 
       if (!pts.length) { document.getElementById('noData').style.display = 'block'; return; }
       document.getElementById('noData').style.display = 'none';
+      
+      // DEEP SLEEP RECOVERY:
+      // I dispositivi mobili smettono di inviare ping GPS quando sono perfettamente fermi.
+      // Se tra un punto e l'altro c'è un buco di oltre 3 minuti, attribuiamo quella permanenza
+      // al punto di partenza assumendo che sia rimasto lì in sosta.
+      for (let i = 0; i < pts.length - 1; i++) {
+         let p = pts[i];
+         let nextP = pts[i+1];
+         let departTime = p.timeOut || p.time;
+         let gapMin = (nextP.time - departTime) / 60000;
+         
+         if (gapMin >= 3) {
+             // Trasforma il silenzio gps in una sosta sul punto precedente, fino a poco prima del nuovo ping.
+             p.timeOut = new Date(nextP.time.getTime() - 60000); 
+         }
+      }
 
       // Colored polyline segments
       for (let i = 1; i < pts.length; i++) {
@@ -1418,54 +1466,63 @@
         activeLayers.push(seg);
       }
 
-      // Start marker (se non è una zona)
-      if (!pts[0].isZone) addCircle(pts[0].lat, pts[0].lng, '#22c55e', `<b>🟢 Partenza</b><br>${fDT(pts[0].time)}`).addTo(map);
+      const timelineEvents = [];
 
-      // End marker (se non è zona)
-      const last = pts[pts.length - 1];
-      currentLastPoint = last; // Save it to connect real-time position
-      if (!last.isZone) addCircle(last.lat, last.lng, '#ef4444', `<b>🔴 Ultima posizione</b><br>${fDT(last.time)}`).addTo(map);
-
+      // Zone & Stops & Timeline parsing UNIFIED
+      pts.forEach((p, i) => {
+         const timeStr = (p.timeOut && p.timeOut > p.time && fTime(p.time) !== fTime(p.timeOut)) 
+                        ? `${fTime(p.time)} - ${fTime(p.timeOut)}` : `${fTime(p.time)}`;
+                        
+         if (p.isZone) {
+            const durMin = ((p.timeOut || p.time) - p.time) / 60000;
+            const tr = `<b>🏠 Zona: ${p.zoneName}</b><br>Dalle ${fTime(p.time)} alle ${fTime(p.timeOut||p.time)}<br>Durata: ${fDur(durMin)}`;
+            const m = L.circleMarker([p.lat, p.lng], {
+              radius: 12, fillColor: '#8b5cf6', color: '#fff', weight: 3, opacity: 1, fillOpacity: 1
+            }).bindPopup(tr);
+            clusterGroup.addLayer(m);
+            timelineEvents.push({ time: p.time, lat: p.lat, lng: p.lng, label: durMin > 1 ? `🏠 Zona: ${p.zoneName} (${timeStr})` : `🏠 In transito zona ${p.zoneName} (${timeStr})` });
+         } else {
+            const duraMin = p.timeOut ? ((p.timeOut - p.time) / 60000) : 0;
+            let lbl = '';
+            if (duraMin >= 3) {
+               // Aggiungiamo pallino arancio Mappa
+               const m = addCircle(p.lat, p.lng, '#f59e0b',
+                 `<b>⏸️ Sosta</b><br>${fTime(p.time)} → ${fTime(p.timeOut||p.time)}<br>Durata: ${fDur(duraMin)}`);
+               clusterGroup.addLayer(m);
+               lbl = `⏸️ Fermo/Sosta (${timeStr})`;
+            } else {
+               lbl = p.speed > 10 ? `🚗 Transito (${p.speed.toFixed(0)} km/h) (${timeStr})` : `🚶 Movimento (${(p.speed||0).toFixed(0)} km/h) (${timeStr})`;
+            }
+            timelineEvents.push({ time: p.time, lat: p.lat, lng: p.lng, label: lbl });
+         }
+      });
+      
+      // Override Start/End per Mappa e Timeline
+      if (timelineEvents.length && !pts[0].isZone) {
+         addCircle(pts[0].lat, pts[0].lng, '#22c55e', `<b>🟢 Partenza</b><br>${fDT(pts[0].time)}`).addTo(map);
+         if (!timelineEvents[0].label.includes('Sosta')) timelineEvents[0].label = '🟢 Partenza';
+      }
+      
+      const lastIdx = pts.length - 1;
+      currentLastPoint = pts[lastIdx]; // Save it to connect real-time position
+      
+      if (timelineEvents.length > 1 && !pts[lastIdx].isZone) {
+         addCircle(pts[lastIdx].lat, pts[lastIdx].lng, '#ef4444', `<b>🔴 Ultima posizione</b><br>${fDT(pts[lastIdx].time)}`).addTo(map);
+         if (!timelineEvents[lastIdx].label.includes('Sosta')) timelineEvents[lastIdx].label = '🔴 Ultima posizione';
+      }
+      
       // Re-trigger realtime position to reconnect line if needed
       if (realtimeLayer) {
          fetchRealtimePosition(forceZoom);
       }
 
-      // Zone & Stops
-      pts.forEach(p => {
-         if (p.isZone) {
-            const tr = `<b>🏠 Zona: ${p.zoneName}</b><br>Dalle ${fTime(p.time)} alle ${fTime(p.timeOut||p.time)}<br>Durata: ${fDur(((p.timeOut||p.time)-p.time)/60000)}`;
-            const m = L.circleMarker([p.lat, p.lng], {
-              radius: 12, fillColor: '#8b5cf6', color: '#fff', weight: 3, opacity: 1, fillOpacity: 1
-            }).bindPopup(tr);
-            clusterGroup.addLayer(m);
-         }
-      });
-      
-      detectStops(pts).forEach(s => {
-        const m = addCircle(s.lat, s.lng, '#f59e0b',
-          `<b>⏸️ Sosta</b><br>${fTime(s.from)} → ${fTime(s.to)}<br>Durata: ${fDur((s.to - s.from) / 60000)}`);
-        clusterGroup.addLayer(m);
-      });
+      // Manda gli eventi generati contemporaneamente per il rendering UI
+      renderTimelineUI(timelineEvents);
 
       // Fit bounds conditionally
       if (forceZoom) {
          map.fitBounds(L.latLngBounds(pts.map(p => [p.lat, p.lng])), { padding: [50, 50] });
       }
-    }
-
-    function detectStops(pts) {
-      const stops = [];
-      pts.forEach(p => {
-         // Se il punto ha una durata timeOut e non è una zona, calcoliamo se è rimasto stazionario per +10 min
-         if (!p.isZone && p.timeOut) {
-            const duraMin = (p.timeOut - p.time) / 60000;
-            if (duraMin >= 3) {
-               stops.push({ lat: p.lat, lng: p.lng, from: p.time, to: p.timeOut });
-            }
-         }
-      });
-      return stops;
     }
 
     function addCircle(lat, lng, color, popup) {
@@ -1512,47 +1569,10 @@
     }
 
     // ─── TIMELINE ─────────────────────────────────────────
-    function updateTimeline(pts) {
+    function renderTimelineUI(events) {
       const el = document.getElementById('timeline');
       el.innerHTML = '';
-      if (!pts.length) { el.innerHTML = '<div style="color:#475569;font-size:12px">Nessun dato</div>'; return; }
-
-      const events = [];
-      pts.forEach((p, i) => {
-        let label = `📍 Rilevamento`;
-        
-        let timeStr = (p.timeOut && p.timeOut > p.time && fTime(p.time) !== fTime(p.timeOut)) 
-                           ? `${fTime(p.time)} - ${fTime(p.timeOut)}` 
-                           : `${fTime(p.time)}`;
-
-        if (p.isZone) {
-           const durMin = ((p.timeOut || p.time) - p.time) / 60000;
-           if (durMin > 1) {
-              label = `🏠 Zona: ${p.zoneName} (${timeStr})`;
-           } else {
-              label = `🏠 In transito zona ${p.zoneName} (${timeStr})`;
-           }
-        } else {
-           // Se non è una zona, la priorità assoluta va alla sosta!
-           const stallMin = p.timeOut ? ((p.timeOut - p.time) / 60000) : 0;
-           if (stallMin >= 3) {
-              label = `⏸️ Fermo/Sosta (${timeStr})`;
-           } else if (p.speed > 10) {
-              label = `🚗 Transito (${p.speed.toFixed(0)} km/h) (${timeStr})`;
-           } else {
-              label = `🚶 Movimento (${(p.speed || 0).toFixed(0)} km/h) (${timeStr})`;
-           }
-        }
-
-        // Preserve Sosta text if it's the Start/End point
-        let isSosta = label.includes('Sosta');
-        if (!p.isZone) {
-           if (i === 0) label = isSosta ? `🟢 Partenza (Sosta confermata)` : '🟢 Partenza';
-           if (i === pts.length - 1) label = isSosta ? `🔴 Ultima posizione (Fermo/Sosta)` : '🔴 Ultima posizione';
-        }
-
-        events.push({ time: p.time, label: label, lat: p.lat, lng: p.lng });
-      });
+      if (!events.length) { el.innerHTML = '<div style="color:#475569;font-size:12px">Nessun dato</div>'; return; }
 
       // Invertiamo l'ordine in modo che l'ultimo punto sia sempre il primo in alto
       events.reverse();
