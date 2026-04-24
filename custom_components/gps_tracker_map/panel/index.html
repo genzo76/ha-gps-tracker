@@ -1412,11 +1412,7 @@
       for (let i = 1; i < pts.length; i++) {
         const seg = L.polyline(
           [[pts[i - 1].lat, pts[i - 1].lng], [pts[i].lat, pts[i].lng]],
-          { color: speedColor(pts[i].speed), weight: 7, opacity: 0.9, className: 'poly-shadow' }
-        );
-        seg.bindTooltip(
-          `${fTime(pts[i].time)}  ·  ${pts[i].speed.toFixed(0)} km/h`,
-          { className: 'custom-tooltip', sticky: true }
+          { color: speedColor(pts[i].speed), weight: 7, opacity: 0.9, className: 'poly-shadow', interactive: false }
         );
         seg.addTo(map);
         activeLayers.push(seg);
@@ -1548,9 +1544,11 @@
            }
         }
 
+        // Preserve Sosta text if it's the Start/End point
+        let isSosta = label.includes('Sosta');
         if (!p.isZone) {
-           if (i === 0) label = '🟢 Partenza';
-           if (i === pts.length - 1) label = '🔴 Ultima posizione';
+           if (i === 0) label = isSosta ? `🟢 Partenza (Sosta confermata)` : '🟢 Partenza';
+           if (i === pts.length - 1) label = isSosta ? `🔴 Ultima posizione (Fermo/Sosta)` : '🔴 Ultima posizione';
         }
 
         events.push({ time: p.time, label: label, lat: p.lat, lng: p.lng });

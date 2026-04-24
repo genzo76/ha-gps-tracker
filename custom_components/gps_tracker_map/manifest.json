@@ -1,7 +1,7 @@
 {
   "domain": "gps_tracker_map",
   "name": "GPS Tracker Map",
-  "version": "1.5.10",
+  "version": "1.5.11",
   "documentation": "https://github.com/genzo76/ha-gps-tracker",
   "requirements": [],
   "dependencies": ["recorder"],
