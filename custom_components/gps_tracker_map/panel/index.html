@@ -316,6 +316,10 @@
       background: #1a1f2e
     }
 
+    .poly-shadow {
+      filter: drop-shadow(0px 3px 4px rgba(0,0,0,0.5));
+    }
+
     .map-wrap {
       position: relative;
       flex: 1;
@@ -608,25 +612,37 @@
     <span class="loading-text">Caricamento percorsi GPS...</span>
   </div>
 
+  <!-- Auth Modal (Mobile Only Error) -->
+  <div class="modal-overlay" id="authModal">
+    <div class="modal" style="width: 320px;">
+      <div class="modal-title">🔒 Autenticazione Richiesta</div>
+      <div class="modal-sub">
+        L'app sul telefono blocca l'accesso magico all'account. <br><br>
+        Incolla qui un Token di Accesso di lunga durata per sbloccare la mappa!<br><br>
+        <a href="#" onclick="openProfilePage()">Genera token dal tuo Profilo HA →</a>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Long-Lived Access Token</label>
+        <input class="form-input" id="authModalToken" type="password" placeholder="eyJh..." />
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-primary" onclick="saveAuthToken()">Salva e Sblocca</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Settings Modal -->
   <div class="modal-overlay" id="settingsModal">
     <div class="modal">
       <div class="modal-title">⚙️ Configurazione</div>
       <div class="modal-sub">
-        Il trucco del token automatico funziona benissimo su Desktop, ma in alcune app (es. HA Companion App) i browser bloccano l'accesso ai cookie/localstorage. <br>
-        Se vedi Errore 401 sul telefono, devi incollare un Token manuale qui sotto.<br>
-        <a href="#" onclick="openProfilePage()">Genera token → Profilo HA → Token di accesso di lunga durata</a>
+        Pannello di controllo della mappa. L'autenticazione è gestita automaticamente da Home Assistant.<br>
       </div>
       <div class="error-msg" id="errMsg"></div>
       <div class="form-group">
         <label class="form-label">URL di Home Assistant</label>
         <input class="form-input" id="cfgUrl" placeholder="http://homeassistant.local:8123" />
         <span class="form-hint">L'indirizzo con cui accedi a HA</span>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Long-Lived Access Token (Token manuale per App)</label>
-        <input class="form-input" id="cfgToken" type="password" placeholder="Incolla il token qui se vedi errore 401..." />
-        <span class="form-hint">Lascia vuoto se stai su PC e l'auto-auth funziona.</span>
       </div>
 
       <div class="form-group">
@@ -820,7 +836,6 @@
     // ─── SETTINGS ─────────────────────────────────────────
     function openSettings() {
       document.getElementById('cfgUrl').value = cfg.url || window.location.origin;
-      document.getElementById('cfgToken').value = cfg.token || '';
       document.getElementById('cfgEntity').value = cfg.entity || '';
       document.getElementById('cfgDays').value = cfg.days || 3;
       document.getElementById('cfgRefresh').value = cfg.refresh || 1;
@@ -832,15 +847,20 @@
     }
     function saveSettings() {
       const url = document.getElementById('cfgUrl').value.trim().replace(/\/$/, '');
-      const token = document.getElementById('cfgToken').value.trim();
       const entity = document.getElementById('cfgEntity').value.trim();
       const days = parseInt(document.getElementById('cfgDays').value) || 3;
       const refresh = parseInt(document.getElementById('cfgRefresh').value) || 1;
       const minDist = parseInt(document.getElementById('cfgMinDist').value) || 0;
-      cfg = { url, token, entity, days, refresh, minDist };
+      cfg = { ...cfg, url, entity, days, refresh, minDist };
       localStorage.setItem('ha_gps_tracker_cfg', JSON.stringify(cfg));
       closeSettings();
       loadTrackers();
+    }
+    function saveAuthToken() {
+      cfg.token = document.getElementById('authModalToken').value.trim();
+      localStorage.setItem('ha_gps_tracker_cfg', JSON.stringify(cfg));
+      document.getElementById('authModal').classList.remove('active');
+      loadTrackers(); // Riprova a caricare con il nuovo token manuale
     }
     function showErr(msg) {
       const el = document.getElementById('errMsg');
@@ -888,6 +908,7 @@
       const headers = { ...extraHeaders };
       const autoToken = getAutoToken();
       if (autoToken) headers['Authorization'] = `Bearer ${autoToken}`;
+      else if (cfg.token) headers['Authorization'] = `Bearer ${cfg.token}`;
       return fetch(url, { credentials: 'include', headers, cache: 'no-store' });
     }
 
@@ -900,10 +921,10 @@
           addLog(`loadTrackers: HTTP ${res.status} — auth fallita`);
           setLoading(false);
           if (res.status === 401) {
-            document.getElementById('errMsg').textContent = '⚠️ Errore 401: Autorizzazione fallita. (Su Mobile serve il Long-Lived Token manuale nelle impostazioni!)';
-            document.getElementById('errMsg').style.display = 'block';
+            document.getElementById('authModal').classList.add('active');
+          } else {
+            openSettings();
           }
-          openSettings();
           return;
         }
         const states = await res.json();
@@ -996,7 +1017,10 @@
           `${cfg.url}/api/history/period/${start.toISOString()}?filter_entity_id=${cfg.entity}&end_time=${end.toISOString()}&significant_changes_only=false&minimal_response=false`
         );
         if (!res.ok) {
-          if (res.status === 401) throw new Error('Token non valido. Aprire le impostazioni e rigenerare il token.');
+          if (res.status === 401) {
+             document.getElementById('authModal').classList.add('active');
+             throw new Error('Token scaduto o assente. Inserisci il token manuale.');
+          }
           if (res.status === 404) throw new Error(`Entità "${cfg.entity}" non trovata in HA.`);
           throw new Error(`Errore HTTP ${res.status}`);
         }
@@ -1144,7 +1168,7 @@
       buildDayTabs();
       
       const firstDay = sortedDays()[0];
-      const targetDay = (currentTab && allData[currentTab]) ? currentTab : firstDay;
+      const targetDay = (currentTab === 'all' || (currentTab && allData[currentTab])) ? currentTab : firstDay;
       const shouldZoom = !currentTab; // Solo per il primissimo caricamento o cambio tracker
       
       selectDay(targetDay, shouldZoom);
@@ -1232,16 +1256,23 @@
           if (realtimeLayer) realtimeLayer.setPopupContent(mkPopup(addr));
         });
 
-        // Draw dashed line from the last historical point on the map to the real-time point
-        if (currentLastPoint && (currentLastPoint.lat !== lat || currentLastPoint.lng !== lng)) {
+        // Draw dashed line ONLY if we are viewing Today or All history
+        const todayStr = new Date().toLocaleDateString('it-IT');
+        const isTodayOrAll = (currentTab === 'all' || currentTab === todayStr);
+
+        if (isTodayOrAll && currentLastPoint && (currentLastPoint.lat !== lat || currentLastPoint.lng !== lng)) {
           realtimeLine = L.polyline(
             [[currentLastPoint.lat, currentLastPoint.lng], [lat, lng]],
-            { color: '#3b82f6', weight: 4, dashArray: '8, 8', opacity: 0.8 }
+            { color: '#3b82f6', weight: 6, dashArray: '8, 8', opacity: 0.9, className: 'poly-shadow' }
           ).addTo(map);
         }
 
-        // Fit map to include BOTH real-time position AND historical points
-        const allLatLngs = [[lat, lng]];
+        // Fit map to include historical points (and real-time position ONLY if on current day)
+        const allLatLngs = [];
+        if (isTodayOrAll || !currentLastPoint) {
+           allLatLngs.push([lat, lng]);
+        }
+        
         activeLayers.forEach(l => {
           try {
             if (l.getLatLng) { const ll = l.getLatLng(); allLatLngs.push([ll.lat, ll.lng]); }
@@ -1250,9 +1281,9 @@
         });
 
         if (allLatLngs.length === 1) {
-          if (forceZoom) map.setView([lat, lng], 16);
+          if (forceZoom) map.setView(allLatLngs[0], 16);
           document.getElementById('noData').style.display = 'none';
-        } else {
+        } else if (allLatLngs.length > 1) {
           if (forceZoom) map.fitBounds(L.latLngBounds(allLatLngs), { padding: [60, 60] });
         }
       } catch (_) {}
@@ -1322,7 +1353,7 @@
       for (let i = 1; i < pts.length; i++) {
         const seg = L.polyline(
           [[pts[i - 1].lat, pts[i - 1].lng], [pts[i].lat, pts[i].lng]],
-          { color: speedColor(pts[i].speed), weight: 4, opacity: .85 }
+          { color: speedColor(pts[i].speed), weight: 6, opacity: 0.9, className: 'poly-shadow' }
         );
         seg.bindTooltip(
           `${fTime(pts[i].time)}  ·  ${pts[i].speed.toFixed(0)} km/h`,
