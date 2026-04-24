@@ -611,9 +611,8 @@
     <div class="modal">
       <div class="modal-title">⚙️ Configurazione</div>
       <div class="modal-sub">
-        Il pannello funziona già se sei <strong style="color:#34d399">loggato in Home Assistant</strong> — nessun token necessario.<br>
-        Inserisci un token solo se accedi da esterno o hai problemi di autenticazione.<br>
-        <a href="#" onclick="openProfilePage()">Genera token → Profilo HA → Token di accesso di lunga durata</a>
+        Il pannello sfrutta l'autenticazione integrata di Home Assistant.<br>
+        Le impostazioni di base sono già configurate per funzionare out-of-the-box.
       </div>
       <div class="error-msg" id="errMsg"></div>
       <div class="form-group">
@@ -621,11 +620,7 @@
         <input class="form-input" id="cfgUrl" placeholder="http://homeassistant.local:8123" />
         <span class="form-hint">L'indirizzo con cui accedi a HA</span>
       </div>
-      <div class="form-group">
-        <label class="form-label">Long-Lived Access Token <span style="color:#475569">(opzionale)</span></label>
-        <input class="form-input" id="cfgToken" type="password" placeholder="Solo se accedi da fuori HA o hai errori 401" />
-        <span class="form-hint">Lascia vuoto se sei già loggato nel browser/app HA</span>
-      </div>
+
       <div class="form-group">
         <label class="form-label">Entity ID Device Tracker (opzionale)</label>
         <input class="form-input" id="cfgEntity" placeholder="Auto-rilevato dopo salvataggio" />
@@ -638,7 +633,7 @@
           </div>
           <div class="form-group">
             <label class="form-label">Intervallo refresh (min)</label>
-            <input class="form-input" id="cfgRefresh" type="number" value="5" min="1" max="60" />
+            <input class="form-input" id="cfgRefresh" type="number" value="1" min="1" max="60" />
           </div>
         </div>
         <div class="form-group">
@@ -763,7 +758,7 @@
   <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
   <script>
     // ─── CONFIG ───────────────────────────────────────────
-    let cfg = { url: '', token: '', entity: '', days: 3, refresh: 5, minDist: 30 };
+    let cfg = { url: '', entity: '', days: 3, refresh: 1, minDist: 30 };
     let map, clusterGroup;
     let allData = {};   // { 'DD/MM/YYYY': [point,...] }
     let activeLayers = [];
@@ -781,9 +776,9 @@
 
     function initMap() {
       map = L.map('map', { center: [41.9, 12.5], zoom: 6 });
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-        attribution: '&copy; OpenStreetMap &copy; CARTO',
-        subdomains: 'abcd', maxZoom: 20
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        maxZoom: 19
       }).addTo(map);
       clusterGroup = L.markerClusterGroup({ maxClusterRadius: 50, disableClusteringAtZoom: 16 });
       map.addLayer(clusterGroup);
@@ -813,10 +808,9 @@
     // ─── SETTINGS ─────────────────────────────────────────
     function openSettings() {
       document.getElementById('cfgUrl').value = cfg.url || window.location.origin;
-      document.getElementById('cfgToken').value = cfg.token || '';
       document.getElementById('cfgEntity').value = cfg.entity || '';
       document.getElementById('cfgDays').value = cfg.days || 3;
-      document.getElementById('cfgRefresh').value = cfg.refresh || 5;
+      document.getElementById('cfgRefresh').value = cfg.refresh || 1;
       document.getElementById('cfgMinDist').value = cfg.minDist !== undefined ? cfg.minDist : 30;
       document.getElementById('settingsModal').classList.add('active');
     }
@@ -825,12 +819,11 @@
     }
     function saveSettings() {
       const url = document.getElementById('cfgUrl').value.trim().replace(/\/$/, '');
-      const token = document.getElementById('cfgToken').value.trim();
       const entity = document.getElementById('cfgEntity').value.trim();
       const days = parseInt(document.getElementById('cfgDays').value) || 3;
-      const refresh = parseInt(document.getElementById('cfgRefresh').value) || 5;
+      const refresh = parseInt(document.getElementById('cfgRefresh').value) || 1;
       const minDist = parseInt(document.getElementById('cfgMinDist').value) || 0;
-      cfg = { url, token, entity, days, refresh, minDist };
+      cfg = { url, entity, days, refresh, minDist };
       localStorage.setItem('ha_gps_tracker_cfg', JSON.stringify(cfg));
       closeSettings();
       loadTrackers();
@@ -859,11 +852,29 @@
       if (p.style.display !== 'none') addLog('-- log aperto --');
     }
 
-    // ─── AUTH HELPER ──────────────────────────────────────
+    // ─── AUTH HELPER & AUTO TOKEN ─────────────────────────
+    function getAutoToken() {
+      try {
+        const ha = window.parent.document.querySelector('home-assistant');
+        if (ha && ha.hass && ha.hass.connection && ha.hass.connection._auth) {
+           return ha.hass.connection._auth.accessToken;
+        }
+      } catch(e) {}
+      try {
+        const tStr = window.parent.localStorage.getItem('hassTokens') || localStorage.getItem('hassTokens');
+        if (tStr) {
+           const parsed = JSON.parse(tStr);
+           if (parsed.access_token) return parsed.access_token;
+        }
+      } catch(e) {}
+      return null;
+    }
+
     function haFetch(url, extraHeaders = {}) {
       const headers = { ...extraHeaders };
-      if (cfg.token) headers['Authorization'] = `Bearer ${cfg.token}`;
-      return fetch(url, { credentials: 'include', headers });
+      const autoToken = getAutoToken();
+      if (autoToken) headers['Authorization'] = `Bearer ${autoToken}`;
+      return fetch(url, { credentials: 'include', headers, cache: 'no-store' });
     }
 
     // ─── TRACKER DISCOVERY ────────────────────────────────
@@ -875,7 +886,7 @@
           addLog(`loadTrackers: HTTP ${res.status} — auth fallita`);
           setLoading(false);
           if (res.status === 401) {
-            document.getElementById('errMsg').textContent = '⚠️ Auth fallita (401): inserisci il token nelle impostazioni.';
+            document.getElementById('errMsg').textContent = '⚠️ Errore di Autenticazione (401). Prova a ricaricare Home Assistant e fare di nuovo login.';
             document.getElementById('errMsg').style.display = 'block';
           }
           openSettings();
