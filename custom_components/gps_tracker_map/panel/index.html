@@ -767,6 +767,8 @@
   <script>
     // ─── CONFIG ───────────────────────────────────────────
     let cfg = { url: '', token: '', entity: '', days: 3, refresh: 1, minDist: 30 };
+    let haZones = [];
+    let lastGeocode = { lat: 0, lng: 0, address: '' };
     let map, clusterGroup;
     let allData = {};   // { 'DD/MM/YYYY': [point,...] }
     let activeLayers = [];
@@ -905,6 +907,19 @@
           return;
         }
         const states = await res.json();
+        
+        haZones = states
+          .filter(s => s.entity_id.startsWith('zone.'))
+          .map(s => ({
+            id: s.entity_id,
+            name: s.attributes.friendly_name || s.entity_id.replace('zone.', ''),
+            lat: parseFloat(s.attributes.latitude),
+            lng: parseFloat(s.attributes.longitude),
+            radius: parseFloat(s.attributes.radius) || 100,
+            icon: s.attributes.icon || 'mdi:map-marker'
+          }))
+          .filter(z => !isNaN(z.lat) && !isNaN(z.lng));
+
         const trackers = states
           .filter(s => s.entity_id.startsWith('device_tracker.'))
           .sort((a, b) => {
@@ -1045,6 +1060,20 @@
       processPoints(points);
     }
 
+    function getZoneForPoint(lat, lng) {
+      if (!haZones || !haZones.length) return null;
+      let bestZone = null;
+      let minRadius = Infinity;
+      for (const z of haZones) {
+         const d = haversine(lat, lng, z.lat, z.lng) * 1000;
+         if (d <= z.radius && z.radius < minRadius) {
+            bestZone = z;
+            minRadius = z.radius;
+         }
+      }
+      return bestZone;
+    }
+
     function processPoints(rawPoints) {
       allData = {};
       if (!rawPoints.length) {
@@ -1053,23 +1082,44 @@
         return;
       }
       
-      // Filter overlapping points and micro-drifts
+      // Filtra sbalzi da celle telefoniche su tutto lo storico (incluso il primo punto in assoluto!)
+      const validRawPoints = rawPoints.filter(p => !p.acc || p.acc <= 150);
+      const safePoints = validRawPoints.length > 0 ? validRawPoints : rawPoints;
+
       const minDist = cfg.minDist !== undefined ? cfg.minDist : 30;
-      const points = [rawPoints[0]];
-      let lastAccepted = rawPoints[0];
+      const points = [];
+      let activeZone = null;
+      let lastAccepted = null;
 
-      for (let i = 1; i < rawPoints.length; i++) {
-        // Scarta i "sbalzi" palesi e sbandate del GPS da celle telefoniche indoor
-        if (rawPoints[i].acc > 150) continue;
+      for (let i = 0; i < safePoints.length; i++) {
+        const p = safePoints[i];
+        const z = getZoneForPoint(p.lat, p.lng);
 
-        // Strict identical check
-        if (rawPoints[i].lat === lastAccepted.lat && rawPoints[i].lng === lastAccepted.lng) continue;
-
-        // Anti-drift radius check
-        const distM = haversine(rawPoints[i].lat, rawPoints[i].lng, lastAccepted.lat, lastAccepted.lng) * 1000;
-        if (distM >= minDist) {
-          points.push(rawPoints[i]);
-          lastAccepted = rawPoints[i];
+        if (z) {
+           if (!activeZone || activeZone.id !== z.id) {
+               p.isZone = true; p.zoneName = z.name;
+               p.lat = z.lat; p.lng = z.lng; // snap to zone coordinates
+               p.timeOut = p.time;
+               points.push(p);
+               activeZone = z;
+               lastAccepted = p;
+           } else {
+               points[points.length - 1].timeOut = p.time; // extends stay duration quietly
+           }
+        } else {
+           activeZone = null;
+           if (!lastAccepted) {
+              points.push(p);
+              lastAccepted = p;
+           } else {
+              if (p.lat === lastAccepted.lat && p.lng === lastAccepted.lng) continue;
+              const distM = haversine(p.lat, p.lng, lastAccepted.lat, lastAccepted.lng) * 1000;
+              // Uscendo dalla zona o rientro nei limiti spaziali normali, loggiamo nuovo punto
+              if (distM >= minDist || lastAccepted.isZone) {
+                 points.push(p);
+                 lastAccepted = p;
+              }
+           }
         }
       }
 
@@ -1078,7 +1128,8 @@
       // Speed calculation
       for (let i = 1; i < points.length; i++) {
         const d = haversine(points[i - 1].lat, points[i - 1].lng, points[i].lat, points[i].lng);
-        const dt = (points[i].time - points[i - 1].time) / 3600000;
+        const prevTime = points[i - 1].timeOut || points[i - 1].time;
+        const dt = (points[i].time - prevTime) / 3600000;
         points[i].dist = d;
         points[i].speed = dt > 0 ? Math.min(d / dt, 300) : 0;
       }
@@ -1116,7 +1167,24 @@
       fetchRealtimePosition(); // always show real-time position even without history
     }
 
-    // ─── REAL-TIME POSITION ───────────────────────────────
+    // ─── REAL-TIME POSITION E GEOCODING ───────────────────
+    async function reverseGeocode(lat, lng) {
+      if (haversine(lat, lng, lastGeocode.lat, lastGeocode.lng) * 1000 < 50 && lastGeocode.address) {
+        return lastGeocode.address;
+      }
+      try {
+        const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`);
+        const data = await r.json();
+        if (data && data.display_name) {
+          const parts = data.display_name.split(',').map(s => s.trim());
+          const shortAddr = parts.slice(0, 3).join(', '); // Prendiamo solo via, quartiere e città
+          lastGeocode = { lat, lng, address: shortAddr };
+          return shortAddr;
+        }
+      } catch(e) {}
+      return 'Indirizzo sconosciuto';
+    }
+
     async function fetchRealtimePosition(forceZoom = true) {
       if (!cfg.entity) return;
       try {
@@ -1145,14 +1213,24 @@
           iconSize: [20, 20],
           iconAnchor: [10, 10]
         });
-        realtimeLayer = L.marker([lat, lng], { icon, zIndexOffset: 1000 })
-          .bindPopup(
-            `<b style="color:#60a5fa">📡 Posizione attuale</b><br>
+        const mkPopup = (addr) => `
+             <b style="color:#60a5fa">📡 Posizione attuale</b><br>
              Stato: <b>${state.state}</b><br>
              Aggiornata: ${fDT(new Date(state.last_updated))}<br>
-             Precisione: ${state.attributes?.gps_accuracy ?? '?'} m`
-          )
+             Precisione: ${state.attributes?.gps_accuracy ?? '?'} m<br>
+             <div style="margin-top:8px; padding:6px; background:rgba(255,255,255,0.08); border-radius:6px; font-size:11px; line-height:1.4;">
+               📍 <i>${addr}</i>
+             </div>
+        `;
+
+        realtimeLayer = L.marker([lat, lng], { icon, zIndexOffset: 1000 })
+          .bindPopup(mkPopup('Ricerca indirizzo in corso...'))
           .addTo(map);
+
+        // Fetch Address asynchronously
+        reverseGeocode(lat, lng).then(addr => {
+          if (realtimeLayer) realtimeLayer.setPopupContent(mkPopup(addr));
+        });
 
         // Draw dashed line from the last historical point on the map to the real-time point
         if (currentLastPoint && (currentLastPoint.lat !== lat || currentLastPoint.lng !== lng)) {
@@ -1254,22 +1332,30 @@
         activeLayers.push(seg);
       }
 
-      // Start marker
-      addCircle(pts[0].lat, pts[0].lng, '#22c55e',
-        `<b>🟢 Partenza</b><br>${fDT(pts[0].time)}`).addTo(map);
+      // Start marker (se non è una zona)
+      if (!pts[0].isZone) addCircle(pts[0].lat, pts[0].lng, '#22c55e', `<b>🟢 Partenza</b><br>${fDT(pts[0].time)}`).addTo(map);
 
-      // End marker
+      // End marker (se non è zona)
       const last = pts[pts.length - 1];
       currentLastPoint = last; // Save it to connect real-time position
-      addCircle(last.lat, last.lng, '#ef4444',
-        `<b>🔴 Ultima posizione</b><br>${fDT(last.time)}`).addTo(map);
+      if (!last.isZone) addCircle(last.lat, last.lng, '#ef4444', `<b>🔴 Ultima posizione</b><br>${fDT(last.time)}`).addTo(map);
 
       // Re-trigger realtime position to reconnect line if needed
       if (realtimeLayer) {
          fetchRealtimePosition(forceZoom);
       }
 
-      // Stops
+      // Zone & Stops
+      pts.forEach(p => {
+         if (p.isZone) {
+            const tr = `<b>🏠 Zona: ${p.zoneName}</b><br>Dalle ${fTime(p.time)} alle ${fTime(p.timeOut||p.time)}<br>Durata: ${fDur(((p.timeOut||p.time)-p.time)/60000)}`;
+            const m = L.circleMarker([p.lat, p.lng], {
+              radius: 12, fillColor: '#8b5cf6', color: '#fff', weight: 3, opacity: 1, fillOpacity: 1
+            }).bindPopup(tr);
+            clusterGroup.addLayer(m);
+         }
+      });
+      
       detectStops(pts).forEach(s => {
         const m = addCircle(s.lat, s.lng, '#f59e0b',
           `<b>⏸️ Sosta</b><br>${fTime(s.from)} → ${fTime(s.to)}<br>Durata: ${fDur((s.to - s.from) / 60000)}`);
@@ -1334,12 +1420,23 @@
       const events = [];
       pts.forEach((p, i) => {
         let label = `📍 Rilevamento`;
-        if (p.speed > 10) label = `🚗 Transito (${p.speed.toFixed(0)} km/h)`;
+        
+        if (p.isZone) {
+           const durMin = ((p.timeOut || p.time) - p.time) / 60000;
+           if (durMin > 1) {
+              label = `🏠 Zona: ${p.zoneName} (${fTime(p.time)} - ${fTime(p.timeOut)})`;
+           } else {
+              label = `🏠 In transito zona ${p.zoneName}`;
+           }
+        } 
+        else if (p.speed > 10) label = `🚗 Transito (${p.speed.toFixed(0)} km/h)`;
         else if (p.speed > 2) label = `🚶 Movimento (${p.speed.toFixed(0)} km/h)`;
         else label = `⏸️ Fermo/Sosta`;
 
-        if (i === 0) label = '🟢 Partenza';
-        if (i === pts.length - 1) label = '🔴 Ultima posizione';
+        if (!p.isZone) {
+           if (i === 0) label = '🟢 Partenza';
+           if (i === pts.length - 1) label = '🔴 Ultima posizione';
+        }
 
         events.push({ time: p.time, label: label, lat: p.lat, lng: p.lng });
       });
