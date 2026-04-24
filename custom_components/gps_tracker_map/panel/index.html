@@ -601,7 +601,7 @@
     }
     .hamburger-btn:hover { background: rgba(167,139,250,.15); }
 
-    @media (max-width: 640px) {
+    @media (max-width: 520px) {
       .sidebar { display: none; width: 0; }
       .sidebar.mob-open { display: flex; flex-direction: column; width: 100%; position: absolute; z-index: 500; top: 0; left: 0; height: 100%; overflow-y: auto; }
       .main { flex-direction: column; }
@@ -721,7 +721,9 @@
       <div class="header-title">GPS Tracker Map</div>
       <div class="header-sub" id="headerSub">Configura le impostazioni per iniziare</div>
     </div>
-    <button id="btnMobMenu" style="display:none;" onclick="document.getElementById('headerRight').classList.toggle('mob-open')">⋮</button>
+    <button id="btnMobMenu" style="display:none;" onclick="document.getElementById('headerRight').classList.toggle('mob-open')">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="5" r="1.5"></circle><circle cx="12" cy="12" r="1.5"></circle><circle cx="12" cy="19" r="1.5"></circle></svg>
+    </button>
     <div class="header-right" id="headerRight">
       <select class="tracker-select" id="trackerSelect" title="Seleziona tracker" onchange="onTrackerChange(this.value)" style="display:none">
         <option value="">— Seleziona tracker —</option>
@@ -1456,7 +1458,7 @@
          // Se il punto ha una durata timeOut e non è una zona, calcoliamo se è rimasto stazionario per +10 min
          if (!p.isZone && p.timeOut) {
             const duraMin = (p.timeOut - p.time) / 60000;
-            if (duraMin >= 10) {
+            if (duraMin >= 3) {
                stops.push({ lat: p.lat, lng: p.lng, from: p.time, to: p.timeOut });
             }
          }
@@ -1517,10 +1519,11 @@
       pts.forEach((p, i) => {
         let label = `📍 Rilevamento`;
         
-        if (p.isZone) {
-           const timeStr = (p.timeOut && p.timeOut > p.time && fTime(p.time) !== fTime(p.timeOut)) 
+        let timeStr = (p.timeOut && p.timeOut > p.time && fTime(p.time) !== fTime(p.timeOut)) 
                            ? `${fTime(p.time)} - ${fTime(p.timeOut)}` 
                            : `${fTime(p.time)}`;
+
+        if (p.isZone) {
            const durMin = ((p.timeOut || p.time) - p.time) / 60000;
            if (durMin > 1) {
               label = `🏠 Zona: ${p.zoneName} (${timeStr})`;
@@ -1528,9 +1531,16 @@
               label = `🏠 In transito zona ${p.zoneName} (${timeStr})`;
            }
         } 
-        else if (p.speed > 10) label = `🚗 Transito (${p.speed.toFixed(0)} km/h)`;
-        else if (p.speed > 2) label = `🚶 Movimento (${p.speed.toFixed(0)} km/h)`;
-        else label = `⏸️ Fermo/Sosta`;
+        else if (p.speed > 10) {
+           label = `🚗 Transito (${p.speed.toFixed(0)} km/h) (${timeStr})`;
+        } else {
+           const stallMin = p.timeOut ? ((p.timeOut - p.time) / 60000) : 0;
+           if (p.speed <= 2 && stallMin >= 3) {
+              label = `⏸️ Fermo/Sosta (${timeStr})`;
+           } else {
+              label = `🚶 Movimento (${p.speed.toFixed(0)} km/h) (${timeStr})`;
+           }
+        }
 
         if (!p.isZone) {
            if (i === 0) label = '🟢 Partenza';
