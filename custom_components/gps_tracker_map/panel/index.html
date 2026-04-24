@@ -55,6 +55,7 @@
       font-weight: 700;
       background: linear-gradient(135deg, #818cf8, #a78bfa);
       -webkit-background-clip: text;
+      background-clip: text;
       -webkit-text-fill-color: transparent
     }
 
@@ -630,16 +631,21 @@
         <input class="form-input" id="cfgEntity" placeholder="Auto-rilevato dopo salvataggio" />
         <span class="form-hint">Lascia vuoto per auto-rilevare · oppure incolla l'entity_id manualmente</span>
       </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Giorni di storico</label>
-          <input class="form-input" id="cfgDays" type="number" value="3" min="1" max="30" />
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Giorni di storico</label>
+            <input class="form-input" id="cfgDays" type="number" value="3" min="1" max="30" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Intervallo refresh (min)</label>
+            <input class="form-input" id="cfgRefresh" type="number" value="5" min="1" max="60" />
+          </div>
         </div>
         <div class="form-group">
-          <label class="form-label">Intervallo refresh (min)</label>
-          <input class="form-input" id="cfgRefresh" type="number" value="5" min="1" max="60" />
+          <label class="form-label">Filtro anti-deriva (metri)</label>
+          <input class="form-input" id="cfgMinDist" type="number" value="30" min="0" max="250" />
+          <span class="form-hint">Ignora i micro-spostamenti inferiori a questa distanza (elimina l'effetto "ragnatela" al chiuso)</span>
         </div>
-      </div>
       <div class="modal-actions">
         <button class="btn btn-secondary" onclick="closeSettings()">Annulla</button>
         <button class="btn btn-primary" onclick="saveSettings()">💾 Salva e carica mappa</button>
@@ -757,11 +763,13 @@
   <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
   <script>
     // ─── CONFIG ───────────────────────────────────────────
-    let cfg = { url: '', token: '', entity: '', days: 3, refresh: 5 };
+    let cfg = { url: '', token: '', entity: '', days: 3, refresh: 5, minDist: 30 };
     let map, clusterGroup;
     let allData = {};   // { 'DD/MM/YYYY': [point,...] }
     let activeLayers = [];
     let realtimeLayer = null;  // blue pulsing dot — current real-time position
+    let realtimeLine = null;   // dashed line to connect history with real-time
+    let currentLastPoint = null; // keeps track of the active tab's final point
     let refreshTimer = null;
     let realtimeTimer = null; // 60-second real-time position updater
 
@@ -809,6 +817,7 @@
       document.getElementById('cfgEntity').value = cfg.entity || '';
       document.getElementById('cfgDays').value = cfg.days || 3;
       document.getElementById('cfgRefresh').value = cfg.refresh || 5;
+      document.getElementById('cfgMinDist').value = cfg.minDist !== undefined ? cfg.minDist : 30;
       document.getElementById('settingsModal').classList.add('active');
     }
     function closeSettings() {
@@ -820,7 +829,8 @@
       const entity = document.getElementById('cfgEntity').value.trim();
       const days = parseInt(document.getElementById('cfgDays').value) || 3;
       const refresh = parseInt(document.getElementById('cfgRefresh').value) || 5;
-      cfg = { url, token, entity, days, refresh };
+      const minDist = parseInt(document.getElementById('cfgMinDist').value) || 0;
+      cfg = { url, token, entity, days, refresh, minDist };
       localStorage.setItem('ha_gps_tracker_cfg', JSON.stringify(cfg));
       closeSettings();
       loadTrackers();
@@ -1010,13 +1020,31 @@
       processPoints(points);
     }
 
-    function processPoints(points) {
+    function processPoints(rawPoints) {
       allData = {};
-      if (!points.length) {
+      if (!rawPoints.length) {
         setLoading(false);
         document.getElementById('noData').style.display = 'block';
         return;
       }
+      
+      // Filter overlapping points and micro-drifts
+      const minDist = cfg.minDist !== undefined ? cfg.minDist : 30;
+      const points = [rawPoints[0]];
+      let lastAccepted = rawPoints[0];
+
+      for (let i = 1; i < rawPoints.length; i++) {
+        // Strict identical check
+        if (rawPoints[i].lat === lastAccepted.lat && rawPoints[i].lng === lastAccepted.lng) continue;
+
+        // Anti-drift radius check
+        const distM = haversine(rawPoints[i].lat, rawPoints[i].lng, lastAccepted.lat, lastAccepted.lng) * 1000;
+        if (distM >= minDist) {
+          points.push(rawPoints[i]);
+          lastAccepted = rawPoints[i];
+        }
+      }
+
       document.getElementById('noData').style.display = 'none';
 
       // Speed calculation
@@ -1073,8 +1101,9 @@
         }
         addLog(`📡 real-time: ${state.state} @ ${lat.toFixed(5)},${lng.toFixed(5)} (acc:${state.attributes?.gps_accuracy ?? '?'}m)`);
 
-        // Remove old real-time layer
+        // Remove old real-time layers
         if (realtimeLayer) { map.removeLayer(realtimeLayer); realtimeLayer = null; }
+        if (realtimeLine) { map.removeLayer(realtimeLine); realtimeLine = null; }
 
         // Pulsing blue circle for current position
         const icon = L.divIcon({
@@ -1091,6 +1120,14 @@
              Precisione: ${state.attributes?.gps_accuracy ?? '?'} m`
           )
           .addTo(map);
+
+        // Draw dashed line from the last historical point on the map to the real-time point
+        if (currentLastPoint && (currentLastPoint.lat !== lat || currentLastPoint.lng !== lng)) {
+          realtimeLine = L.polyline(
+            [[currentLastPoint.lat, currentLastPoint.lng], [lat, lng]],
+            { color: '#3b82f6', weight: 4, dashArray: '8, 8', opacity: 0.8 }
+          ).addTo(map);
+        }
 
         // Fit map to include BOTH real-time position AND historical points
         const allLatLngs = [[lat, lng]];
@@ -1163,6 +1200,8 @@
       activeLayers.forEach(l => map.removeLayer(l));
       activeLayers = [];
       clusterGroup.clearLayers();
+      if (realtimeLine) { map.removeLayer(realtimeLine); realtimeLine = null; }
+      currentLastPoint = null;
 
       if (!pts.length) { document.getElementById('noData').style.display = 'block'; return; }
       document.getElementById('noData').style.display = 'none';
@@ -1187,8 +1226,14 @@
 
       // End marker
       const last = pts[pts.length - 1];
+      currentLastPoint = last; // Save it to connect real-time position
       addCircle(last.lat, last.lng, '#ef4444',
         `<b>🔴 Ultima posizione</b><br>${fDT(last.time)}`).addTo(map);
+
+      // Re-trigger realtime position to reconnect line if needed
+      if (realtimeLayer) {
+         fetchRealtimePosition();
+      }
 
       // Stops
       detectStops(pts).forEach(s => {

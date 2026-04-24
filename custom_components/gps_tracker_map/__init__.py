@@ -26,7 +26,7 @@ STATIC_URL = "/gps_tracker_map_static"
 DB_FILENAME = "gps_tracker_map.db"
 POLL_INTERVAL = timedelta(minutes=1)
 RETENTION_DAYS = 90
-MIN_DISTANCE_METERS = 15  # skip point if phone moved less than this
+MIN_DISTANCE_METERS = 30  # skip point if phone moved less than this
 
 
 # ── Database helpers (sync, run in executor) ───────────────────────────────
@@ -78,8 +78,11 @@ def _store_position(
             (entity_id,),
         ).fetchone()
 
-        if row and _haversine_m(row[0], row[1], lat, lng) < MIN_DISTANCE_METERS:
-            return  # Phone hasn't moved enough — skip
+        if row:
+            if lat == row[0] and lng == row[1]:
+                return  # Exact overlap — skip
+            if _haversine_m(row[0], row[1], lat, lng) < MIN_DISTANCE_METERS:
+                return  # Phone hasn't moved enough — skip
 
         conn.execute(
             "INSERT INTO gps_positions "
