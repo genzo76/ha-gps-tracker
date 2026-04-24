@@ -317,7 +317,7 @@
     }
 
     .poly-shadow {
-      filter: drop-shadow(0px 3px 4px rgba(0,0,0,0.5));
+      filter: drop-shadow(0px 0px 1px rgba(0,0,0,0.8)) drop-shadow(3px 6px 3px rgba(0,0,0,0.9));
     }
 
     .map-wrap {
@@ -573,6 +573,15 @@
       70%  { box-shadow: 0 0 0 14px rgba(59,130,246,0) }
       100% { box-shadow: 0 0 0 0 rgba(59,130,246,0) }
     }
+    
+    .target-pulse {
+      border: 4px solid #ef4444; border-radius: 50%;
+      animation: tgt-ring 1s ease-out infinite; box-shadow: 0 0 15px #ef4444;
+    }
+    @keyframes tgt-ring {
+      0% { transform: scale(0.1); opacity: 1; }
+      100% { transform: scale(1.5); opacity: 0; }
+    }
 
     /* ── MOBILE RESPONSIVE ── */
     .mob-bar {
@@ -593,13 +602,44 @@
     .hamburger-btn:hover { background: rgba(167,139,250,.15); }
 
     @media (max-width: 640px) {
-      .header { flex-wrap: wrap; padding: 8px 10px; gap: 6px; }
-      .header-right { display: none !important; } /* move to mob-bar */
-      .mob-bar { display: flex; }
       .sidebar { display: none; width: 0; }
       .sidebar.mob-open { display: flex; flex-direction: column; width: 100%; position: absolute; z-index: 500; top: 0; left: 0; height: 100%; overflow-y: auto; }
       .main { flex-direction: column; }
-      .map-wrap { height: calc(100vh - 110px); }
+      .map-wrap { height: 100vh; } /* 100% fullscreen map! */
+      
+      .header { 
+         position: absolute; top: 10px; left: 0; width: 100%; z-index: 2000; 
+         background: transparent; border: none; padding: 0 10px; 
+         justify-content: space-between; pointer-events: none;
+      }
+      .header > button { pointer-events: auto; }
+      .header-icon, .header-title, .header-sub { display: none !important; }
+
+      .hamburger-btn, #btnMobMenu { 
+         display: block !important; 
+         background: rgba(30, 41, 59, 0.95);
+         border: 1px solid rgba(99,102,241,0.5);
+         border-radius: 8px; padding: 6px 14px;
+         box-shadow: 0 4px 15px rgba(0,0,0,0.7);
+      }
+      
+      .mob-bar { display: none !important; }
+      .header-right { 
+         display: none !important; position: absolute; right: 10px; top: 50px; 
+         background: #1e293b; padding: 16px; border-radius: 12px; pointer-events: auto;
+         box-shadow: 0 10px 40px rgba(0,0,0,0.8); border: 1px solid rgba(99,102,241,0.4);
+         flex-direction: column; gap: 14px; z-index: 3000; width: 220px;
+         align-items: stretch;
+      }
+      .header-right.mob-open { display: flex !important; }
+      .header-right .day-tabs { flex-wrap: wrap; justify-content: flex-start; }
+      .header-right .tracker-select { display: block !important; width: 100%; }
+      .header-btns { display: flex; gap: 10px; justify-content: center; margin-top: 5px; }
+      .mob-close-btn { 
+          display: block !important; width: 100%; padding: 14px; background: rgba(99,102,241,0.1); 
+          color: #a78bfa; font-weight: bold; border: none; border-bottom: 2px solid rgba(99,102,241,.2); 
+          font-family: inherit; font-size: 15px; margin-bottom: 12px; cursor: pointer; text-align: center;
+      }
     }
   </style>
 </head>
@@ -625,8 +665,9 @@
         <label class="form-label">Long-Lived Access Token</label>
         <input class="form-input" id="authModalToken" type="password" placeholder="eyJh..." />
       </div>
-      <div class="modal-actions">
+      <div class="modal-actions" style="flex-direction: column; gap: 8px;">
         <button class="btn btn-primary" onclick="saveAuthToken()">Salva e Sblocca</button>
+        <button class="btn btn-secondary" onclick="document.getElementById('authModal').classList.remove('active')">Ignora per ora</button>
       </div>
     </div>
   </div>
@@ -674,42 +715,38 @@
 
   <!-- Header -->
   <div class="header">
+    <button class="hamburger-btn" style="display:none; margin-right:10px;" onclick="toggleMobSidebar()">☰</button>
     <div class="header-icon">📍</div>
     <div style="flex:1;min-width:0">
       <div class="header-title">GPS Tracker Map</div>
       <div class="header-sub" id="headerSub">Configura le impostazioni per iniziare</div>
     </div>
-    <div class="header-right">
+    <button id="btnMobMenu" style="display:none;" onclick="document.getElementById('headerRight').classList.toggle('mob-open')">⋮</button>
+    <div class="header-right" id="headerRight">
       <select class="tracker-select" id="trackerSelect" title="Seleziona tracker" onchange="onTrackerChange(this.value)" style="display:none">
         <option value="">— Seleziona tracker —</option>
       </select>
       <div class="day-tabs" id="dayTabs"></div>
-      <button class="icon-btn" id="btnRefresh" onclick="doRefresh()" title="Aggiorna dati">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
-          <path d="M23 4v6h-6M1 20v-6h6" />
-          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-        </svg>
-      </button>
-      <button class="icon-btn" onclick="openSettings()" title="Impostazioni">⚙️</button>
-      <button class="icon-btn" onclick="toggleDebug()" title="Debug log">🐛</button>
+      <div class="header-btns">
+        <button class="icon-btn" id="btnRefresh" onclick="doRefresh()" title="Aggiorna dati">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <path d="M23 4v6h-6M1 20v-6h6" />
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+          </svg>
+        </button>
+        <button class="icon-btn" onclick="openSettings()" title="Impostazioni">⚙️</button>
+        <button class="icon-btn" onclick="toggleDebug()" title="Debug log">🐛</button>
+      </div>
     </div>
   </div>
 
-  <!-- Mobile bar (visible only on small screens) -->
-  <div class="mob-bar">
-    <button class="hamburger-btn" onclick="toggleMobSidebar()" title="Statistiche e cronologia">☰</button>
-    <select class="tracker-select" id="trackerSelectMob" title="Seleziona tracker" onchange="onTrackerChange(this.value)" style="display:none">
-      <option value="">— Seleziona tracker —</option>
-    </select>
-    <button class="icon-btn" onclick="doRefresh()" title="Aggiorna">🔄</button>
-    <button class="icon-btn" onclick="openSettings()" title="Impostazioni">⚙️</button>
-    <button class="icon-btn" onclick="toggleDebug()" title="Debug log">🐛</button>
-  </div>
+
 
   <!-- Main -->
   <div class="main">
     <!-- Sidebar -->
     <div class="sidebar">
+      <button class="mob-close-btn" style="display:none;" onclick="toggleMobSidebar()">✕ Chiudi Pannello</button>
       <div class="stats-grid">
         <div class="stat-card">
           <div class="stat-icon">📏</div>
@@ -907,8 +944,9 @@
     function haFetch(url, extraHeaders = {}) {
       const headers = { ...extraHeaders };
       const autoToken = getAutoToken();
-      if (autoToken) headers['Authorization'] = `Bearer ${autoToken}`;
-      else if (cfg.token) headers['Authorization'] = `Bearer ${cfg.token}`;
+      // Il token manuale fornito dall'utente batte sempre il proxy del browser in caso di loop!
+      if (cfg.token && cfg.token.length > 20) headers['Authorization'] = `Bearer ${cfg.token}`;
+      else if (autoToken) headers['Authorization'] = `Bearer ${autoToken}`;
       return fetch(url, { credentials: 'include', headers, cache: 'no-store' });
     }
 
@@ -942,7 +980,7 @@
           .filter(z => !isNaN(z.lat) && !isNaN(z.lng));
 
         const trackers = states
-          .filter(s => s.entity_id.startsWith('device_tracker.'))
+          .filter(s => s.entity_id.startsWith('device_tracker.') && s.state !== 'unavailable')
           .sort((a, b) => {
             const nameA = a.attributes.friendly_name || a.entity_id;
             const nameB = b.attributes.friendly_name || b.entity_id;
@@ -961,7 +999,6 @@
           sel.appendChild(opt);
         });
         sel.style.display = trackers.length ? 'block' : 'none';
-        syncMobSelect(trackers, cfg.entity);
 
         if (!cfg.entity && trackers.length) {
           cfg.entity = trackers[0].entity_id;
@@ -988,8 +1025,8 @@
     }
 
     // ─── DATA LOADING ─────────────────────────────────────
-    async function loadData() {
-      setLoading(true);
+    async function loadData(isAutoRefresh = false) {
+      setLoading(!isAutoRefresh);
       clearRefreshTimer();
       try {
         // 1) Try our own GPS history DB first (plugin polls every minute)
@@ -1018,8 +1055,9 @@
         );
         if (!res.ok) {
           if (res.status === 401) {
-             document.getElementById('authModal').classList.add('active');
-             throw new Error('Token scaduto o assente. Inserisci il token manuale.');
+             // Blocchiamo il popup aggressivo se è un semplice auto-refresh silente di background che va storto
+             if (!isAutoRefresh) document.getElementById('authModal').classList.add('active');
+             throw new Error('Token scaduto o connessione locale respinta.');
           }
           if (res.status === 404) throw new Error(`Entità "${cfg.entity}" non trovata in HA.`);
           throw new Error(`Errore HTTP ${res.status}`);
@@ -1142,6 +1180,8 @@
               if (distM >= minDist || lastAccepted.isZone) {
                  points.push(p);
                  lastAccepted = p;
+              } else {
+                 lastAccepted.timeOut = p.time; // Logghiamo la durata della sosta fissa sul posto
               }
            }
         }
@@ -1188,7 +1228,8 @@
         '3. Abilita <b>"Posizione in background"</b><br>' +
         '4. Oppure in HA: <b>Impostazioni → Sistema → Registratore</b><br>' +
         '   aggiungi <code>device_tracker</code> agli attributi registrati';
-      fetchRealtimePosition(); // always show real-time position even without history
+      // NOTA: rimosso l'hard-refresh di fetchRealtimePosition per impedire salti involontari di zoom.
+      // E' già processato in modo sicuro da processPoints(!currentTab) subito dopo.
     }
 
     // ─── REAL-TIME POSITION E GEOCODING ───────────────────
@@ -1263,7 +1304,7 @@
         if (isTodayOrAll && currentLastPoint && (currentLastPoint.lat !== lat || currentLastPoint.lng !== lng)) {
           realtimeLine = L.polyline(
             [[currentLastPoint.lat, currentLastPoint.lng], [lat, lng]],
-            { color: '#3b82f6', weight: 6, dashArray: '8, 8', opacity: 0.9, className: 'poly-shadow' }
+            { color: '#3b82f6', weight: 7, dashArray: '8, 8', opacity: 0.9, className: 'poly-shadow' }
           ).addTo(map);
         }
 
@@ -1290,7 +1331,14 @@
     }
 
 
-    // ─── TABS ─────────────────────────────────────────────
+    // ─── UTILS & TIMERS ───────────────────────────────────
+    function scheduleRefresh() {
+      refreshTimer = setTimeout(() => {
+        addLog('refreshTimer: trigger automatico');
+        loadData(true); // Passa true per indicare che è un processo silente
+      }, (cfg.refresh || 1) * 60000);
+    }
+
     function sortedDays() {
       return Object.keys(allData).sort((a, b) => {
         const parse = s => { const [d, m, y] = s.split('/'); return new Date(y, m - 1, d); };
@@ -1327,6 +1375,9 @@
     function selectDay(day, forceZoom = true) {
       currentTab = day;
       document.querySelectorAll('.day-tab').forEach(t => t.classList.toggle('active', t.dataset.day === day));
+      // Chiude il menu a tendina su mobile quando si digita un filtro
+      const rh = document.getElementById('headerRight');
+      if(rh) rh.classList.remove('mob-open');
       let pts;
       if (day === 'all') {
         pts = Object.values(allData).flat().sort((a, b) => a.time - b.time);
@@ -1353,7 +1404,7 @@
       for (let i = 1; i < pts.length; i++) {
         const seg = L.polyline(
           [[pts[i - 1].lat, pts[i - 1].lng], [pts[i].lat, pts[i].lng]],
-          { color: speedColor(pts[i].speed), weight: 6, opacity: 0.9, className: 'poly-shadow' }
+          { color: speedColor(pts[i].speed), weight: 7, opacity: 0.9, className: 'poly-shadow' }
         );
         seg.bindTooltip(
           `${fTime(pts[i].time)}  ·  ${pts[i].speed.toFixed(0)} km/h`,
@@ -1397,6 +1448,20 @@
       if (forceZoom) {
          map.fitBounds(L.latLngBounds(pts.map(p => [p.lat, p.lng])), { padding: [50, 50] });
       }
+    }
+
+    function detectStops(pts) {
+      const stops = [];
+      pts.forEach(p => {
+         // Se il punto ha una durata timeOut e non è una zona, calcoliamo se è rimasto stazionario per +10 min
+         if (!p.isZone && p.timeOut) {
+            const duraMin = (p.timeOut - p.time) / 60000;
+            if (duraMin >= 10) {
+               stops.push({ lat: p.lat, lng: p.lng, from: p.time, to: p.timeOut });
+            }
+         }
+      });
+      return stops;
     }
 
     function addCircle(lat, lng, color, popup) {
@@ -1453,11 +1518,14 @@
         let label = `📍 Rilevamento`;
         
         if (p.isZone) {
+           const timeStr = (p.timeOut && p.timeOut > p.time && fTime(p.time) !== fTime(p.timeOut)) 
+                           ? `${fTime(p.time)} - ${fTime(p.timeOut)}` 
+                           : `${fTime(p.time)}`;
            const durMin = ((p.timeOut || p.time) - p.time) / 60000;
            if (durMin > 1) {
-              label = `🏠 Zona: ${p.zoneName} (${fTime(p.time)} - ${fTime(p.timeOut)})`;
+              label = `🏠 Zona: ${p.zoneName} (${timeStr})`;
            } else {
-              label = `🏠 In transito zona ${p.zoneName}`;
+              label = `🏠 In transito zona ${p.zoneName} (${timeStr})`;
            }
         } 
         else if (p.speed > 10) label = `🚗 Transito (${p.speed.toFixed(0)} km/h)`;
@@ -1479,8 +1547,17 @@
         const d = document.createElement('div');
         d.className = 'tl-item';
         d.innerHTML = `<span class="tl-time">${fTime(ev.time)}</span><span class="tl-desc">${ev.label}</span>`;
-        // Cliccando sul punto si zooma al livello massimo sulla strada esatta
-        d.onclick = () => map.setView([ev.lat, ev.lng], 18);
+        // Cliccando sul punto si zooma al livello massimo sulla strada esatta e chiude l'hamburger se siamo sul telefono
+        d.onclick = () => {
+            map.flyTo([ev.lat, ev.lng], 19, { duration: 1.2 });
+            document.querySelector('.sidebar').classList.remove('mob-open');
+            // Marcatore lampeggiante temporaneo (Radar pulse)
+            const pulse = L.marker([ev.lat, ev.lng], {
+               icon: L.divIcon({ className: 'target-pulse', iconSize: [60,60], iconAnchor: [30,30] }),
+               interactive: false
+            }).addTo(map);
+            setTimeout(() => map.removeLayer(pulse), 3000);
+        };
         el.appendChild(d);
       });
     }
