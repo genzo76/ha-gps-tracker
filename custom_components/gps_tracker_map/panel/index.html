@@ -400,6 +400,8 @@
       padding: 26px;
       width: 430px;
       max-width: 95vw;
+      max-height: 90vh;
+      overflow-y: auto;
       box-shadow: 0 20px 60px rgba(0, 0, 0, .5)
     }
 
@@ -768,6 +770,7 @@
     let map, clusterGroup;
     let allData = {};   // { 'DD/MM/YYYY': [point,...] }
     let activeLayers = [];
+    let currentTab = null;
     let realtimeLayer = null;  // blue pulsing dot — current real-time position
     let realtimeLine = null;   // dashed line to connect history with real-time
     let currentLastPoint = null; // keeps track of the active tab's final point
@@ -782,8 +785,8 @@
 
     function initMap() {
       map = L.map('map', { center: [41.9, 12.5], zoom: 6 });
-      // Mappe Google (non bloccano il referer e sono molto colorate/rapide)
-      L.tileLayer('https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', {
+      // Mappe Google Ibride (Foto Satellitari + Strade)
+      L.tileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
         attribution: '&copy; Google Maps',
         maxZoom: 20
       }).addTo(map);
@@ -944,6 +947,7 @@
       if (!entityId) return;
       cfg.entity = entityId;
       localStorage.setItem('ha_gps_tracker_cfg', JSON.stringify(cfg));
+      currentTab = null; // force zoom on tracker change
       loadData();
     }
 
@@ -1037,6 +1041,7 @@
         time: new Date(s.last_updated),
         speed: 0, dist: 0
       }));
+      points.sort((a, b) => a.time - b.time);
       processPoints(points);
     }
 
@@ -1054,6 +1059,9 @@
       let lastAccepted = rawPoints[0];
 
       for (let i = 1; i < rawPoints.length; i++) {
+        // Scarta i "sbalzi" palesi e sbandate del GPS da celle telefoniche indoor
+        if (rawPoints[i].acc > 150) continue;
+
         // Strict identical check
         if (rawPoints[i].lat === lastAccepted.lat && rawPoints[i].lng === lastAccepted.lng) continue;
 
@@ -1083,9 +1091,14 @@
 
       document.getElementById('headerSub').textContent = cfg.entity;
       buildDayTabs();
-      selectDay(sortedDays()[0]);
+      
+      const firstDay = sortedDays()[0];
+      const targetDay = (currentTab && allData[currentTab]) ? currentTab : firstDay;
+      const shouldZoom = !currentTab; // Solo per il primissimo caricamento o cambio tracker
+      
+      selectDay(targetDay, shouldZoom);
       setLoading(false);
-      fetchRealtimePosition(); // overlay current real-time position
+      fetchRealtimePosition(shouldZoom); // overlay current real-time position
     }
 
     function showLowDataHint(count) {
@@ -1104,7 +1117,7 @@
     }
 
     // ─── REAL-TIME POSITION ───────────────────────────────
-    async function fetchRealtimePosition() {
+    async function fetchRealtimePosition(forceZoom = true) {
       if (!cfg.entity) return;
       try {
         const res = await haFetch(`${cfg.url}/api/states/${encodeURIComponent(cfg.entity)}`);
@@ -1159,10 +1172,10 @@
         });
 
         if (allLatLngs.length === 1) {
-          map.setView([lat, lng], 16);
+          if (forceZoom) map.setView([lat, lng], 16);
           document.getElementById('noData').style.display = 'none';
         } else {
-          map.fitBounds(L.latLngBounds(allLatLngs), { padding: [60, 60] });
+          if (forceZoom) map.fitBounds(L.latLngBounds(allLatLngs), { padding: [60, 60] });
         }
       } catch (_) {}
     }
@@ -1198,11 +1211,12 @@
     function makeTab(day, label) {
       const b = document.createElement('button');
       b.className = 'day-tab'; b.dataset.day = day; b.textContent = label;
-      b.onclick = () => selectDay(day);
+      b.onclick = () => selectDay(day, true); // al click manuale forziamo lo zoom
       return b;
     }
 
-    function selectDay(day) {
+    function selectDay(day, forceZoom = true) {
+      currentTab = day;
       document.querySelectorAll('.day-tab').forEach(t => t.classList.toggle('active', t.dataset.day === day));
       let pts;
       if (day === 'all') {
@@ -1210,13 +1224,13 @@
       } else {
         pts = allData[day] || [];
       }
-      drawMap(pts);
+      drawMap(pts, forceZoom);
       updateStats(pts);
       updateTimeline(pts);
     }
 
     // ─── MAP ──────────────────────────────────────────────
-    function drawMap(pts) {
+    function drawMap(pts, forceZoom = true) {
       activeLayers.forEach(l => map.removeLayer(l));
       activeLayers = [];
       clusterGroup.clearLayers();
@@ -1252,7 +1266,7 @@
 
       // Re-trigger realtime position to reconnect line if needed
       if (realtimeLayer) {
-         fetchRealtimePosition();
+         fetchRealtimePosition(forceZoom);
       }
 
       // Stops
@@ -1262,8 +1276,10 @@
         clusterGroup.addLayer(m);
       });
 
-      // Fit
-      map.fitBounds(L.latLngBounds(pts.map(p => [p.lat, p.lng])), { padding: [50, 50] });
+      // Fit bounds conditionally
+      if (forceZoom) {
+         map.fitBounds(L.latLngBounds(pts.map(p => [p.lat, p.lng])), { padding: [50, 50] });
+      }
     }
 
     function addCircle(lat, lng, color, popup) {
@@ -1315,18 +1331,28 @@
       el.innerHTML = '';
       if (!pts.length) { el.innerHTML = '<div style="color:#475569;font-size:12px">Nessun dato</div>'; return; }
 
-      const events = [{ time: pts[0].time, label: '🟢 Partenza', lat: pts[0].lat, lng: pts[0].lng }];
-      detectStops(pts).forEach(s => events.push({
-        time: s.from, label: `⏸️ Sosta — ${fDur((s.to - s.from) / 60000)} min`, lat: s.lat, lng: s.lng
-      }));
-      events.push({ time: pts[pts.length - 1].time, label: '🔴 Ultima posizione', lat: pts[pts.length - 1].lat, lng: pts[pts.length - 1].lng });
-      events.sort((a, b) => a.time - b.time);
+      const events = [];
+      pts.forEach((p, i) => {
+        let label = `📍 Rilevamento`;
+        if (p.speed > 10) label = `🚗 Transito (${p.speed.toFixed(0)} km/h)`;
+        else if (p.speed > 2) label = `🚶 Movimento (${p.speed.toFixed(0)} km/h)`;
+        else label = `⏸️ Fermo/Sosta`;
+
+        if (i === 0) label = '🟢 Partenza';
+        if (i === pts.length - 1) label = '🔴 Ultima posizione';
+
+        events.push({ time: p.time, label: label, lat: p.lat, lng: p.lng });
+      });
+
+      // Invertiamo l'ordine in modo che l'ultimo punto sia sempre il primo in alto
+      events.reverse();
 
       events.forEach(ev => {
         const d = document.createElement('div');
         d.className = 'tl-item';
         d.innerHTML = `<span class="tl-time">${fTime(ev.time)}</span><span class="tl-desc">${ev.label}</span>`;
-        d.onclick = () => map.setView([ev.lat, ev.lng], 17);
+        // Cliccando sul punto si zooma al livello massimo sulla strada esatta
+        d.onclick = () => map.setView([ev.lat, ev.lng], 18);
         el.appendChild(d);
       });
     }
