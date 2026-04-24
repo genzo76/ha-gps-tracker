@@ -611,14 +611,20 @@
     <div class="modal">
       <div class="modal-title">⚙️ Configurazione</div>
       <div class="modal-sub">
-        Il pannello sfrutta l'autenticazione integrata di Home Assistant.<br>
-        Le impostazioni di base sono già configurate per funzionare out-of-the-box.
+        Il trucco del token automatico funziona benissimo su Desktop, ma in alcune app (es. HA Companion App) i browser bloccano l'accesso ai cookie/localstorage. <br>
+        Se vedi Errore 401 sul telefono, devi incollare un Token manuale qui sotto.<br>
+        <a href="#" onclick="openProfilePage()">Genera token → Profilo HA → Token di accesso di lunga durata</a>
       </div>
       <div class="error-msg" id="errMsg"></div>
       <div class="form-group">
         <label class="form-label">URL di Home Assistant</label>
         <input class="form-input" id="cfgUrl" placeholder="http://homeassistant.local:8123" />
         <span class="form-hint">L'indirizzo con cui accedi a HA</span>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Long-Lived Access Token (Token manuale per App)</label>
+        <input class="form-input" id="cfgToken" type="password" placeholder="Incolla il token qui se vedi errore 401..." />
+        <span class="form-hint">Lascia vuoto se stai su PC e l'auto-auth funziona.</span>
       </div>
 
       <div class="form-group">
@@ -758,7 +764,7 @@
   <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
   <script>
     // ─── CONFIG ───────────────────────────────────────────
-    let cfg = { url: '', entity: '', days: 3, refresh: 1, minDist: 30 };
+    let cfg = { url: '', token: '', entity: '', days: 3, refresh: 1, minDist: 30 };
     let map, clusterGroup;
     let allData = {};   // { 'DD/MM/YYYY': [point,...] }
     let activeLayers = [];
@@ -776,9 +782,10 @@
 
     function initMap() {
       map = L.map('map', { center: [41.9, 12.5], zoom: 6 });
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-        maxZoom: 19
+      // Mappe Google (non bloccano il referer e sono molto colorate/rapide)
+      L.tileLayer('https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', {
+        attribution: '&copy; Google Maps',
+        maxZoom: 20
       }).addTo(map);
       clusterGroup = L.markerClusterGroup({ maxClusterRadius: 50, disableClusteringAtZoom: 16 });
       map.addLayer(clusterGroup);
@@ -808,6 +815,7 @@
     // ─── SETTINGS ─────────────────────────────────────────
     function openSettings() {
       document.getElementById('cfgUrl').value = cfg.url || window.location.origin;
+      document.getElementById('cfgToken').value = cfg.token || '';
       document.getElementById('cfgEntity').value = cfg.entity || '';
       document.getElementById('cfgDays').value = cfg.days || 3;
       document.getElementById('cfgRefresh').value = cfg.refresh || 1;
@@ -819,11 +827,12 @@
     }
     function saveSettings() {
       const url = document.getElementById('cfgUrl').value.trim().replace(/\/$/, '');
+      const token = document.getElementById('cfgToken').value.trim();
       const entity = document.getElementById('cfgEntity').value.trim();
       const days = parseInt(document.getElementById('cfgDays').value) || 3;
       const refresh = parseInt(document.getElementById('cfgRefresh').value) || 1;
       const minDist = parseInt(document.getElementById('cfgMinDist').value) || 0;
-      cfg = { url, entity, days, refresh, minDist };
+      cfg = { url, token, entity, days, refresh, minDist };
       localStorage.setItem('ha_gps_tracker_cfg', JSON.stringify(cfg));
       closeSettings();
       loadTrackers();
@@ -886,7 +895,7 @@
           addLog(`loadTrackers: HTTP ${res.status} — auth fallita`);
           setLoading(false);
           if (res.status === 401) {
-            document.getElementById('errMsg').textContent = '⚠️ Errore di Autenticazione (401). Prova a ricaricare Home Assistant e fare di nuovo login.';
+            document.getElementById('errMsg').textContent = '⚠️ Errore 401: Autorizzazione fallita. (Su Mobile serve il Long-Lived Token manuale nelle impostazioni!)';
             document.getElementById('errMsg').style.display = 'block';
           }
           openSettings();
