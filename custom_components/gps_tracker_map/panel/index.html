@@ -72,6 +72,12 @@
       gap: 8px
     }
 
+    .header-btns {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
     /* ── TRACKER SELECT ── */
     .tracker-select {
       appearance: none;
@@ -722,7 +728,7 @@
       <div class="header-sub" id="headerSub">Configura le impostazioni per iniziare</div>
     </div>
     <button id="btnMobMenu" style="display:none;" onclick="document.getElementById('headerRight').classList.toggle('mob-open')">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="5" r="1.5"></circle><circle cx="12" cy="12" r="1.5"></circle><circle cx="12" cy="19" r="1.5"></circle></svg>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2.5"><circle cx="12" cy="5" r="1.5"></circle><circle cx="12" cy="12" r="1.5"></circle><circle cx="12" cy="19" r="1.5"></circle></svg>
     </button>
     <div class="header-right" id="headerRight">
       <select class="tracker-select" id="trackerSelect" title="Seleziona tracker" onchange="onTrackerChange(this.value)" style="display:none">
@@ -787,7 +793,7 @@
           <div class="legend-line" style="background:#ef4444"></div>Veloce (&gt;80 km/h)
         </div>
         <div class="legend-item">
-          <div style="width:28px;height:10px;border-radius:50%;background:#f59e0b;flex-shrink:0"></div>Punto di sosta
+          <div style="width:12px;height:12px;border-radius:50%;background:#f59e0b;flex-shrink:0"></div>Punto di sosta
         </div>
       </div>
 
@@ -1089,7 +1095,7 @@
         dist: 0
       }));
       processPoints(points.sort((a, b) => a.time - b.time));
-      fetchRealtimePosition(); // also show current real-time dot
+      // fetchRealtimePosition rimosso: zoom è già gestito con le pinze da processPoints(!currentTab)
     }
 
     // Build GPS points from separate lat/lng sensor history
@@ -1530,15 +1536,15 @@
            } else {
               label = `🏠 In transito zona ${p.zoneName} (${timeStr})`;
            }
-        } 
-        else if (p.speed > 10) {
-           label = `🚗 Transito (${p.speed.toFixed(0)} km/h) (${timeStr})`;
         } else {
+           // Se non è una zona, la priorità assoluta va alla sosta!
            const stallMin = p.timeOut ? ((p.timeOut - p.time) / 60000) : 0;
-           if (p.speed <= 2 && stallMin >= 3) {
+           if (stallMin >= 3) {
               label = `⏸️ Fermo/Sosta (${timeStr})`;
+           } else if (p.speed > 10) {
+              label = `🚗 Transito (${p.speed.toFixed(0)} km/h) (${timeStr})`;
            } else {
-              label = `🚶 Movimento (${p.speed.toFixed(0)} km/h) (${timeStr})`;
+              label = `🚶 Movimento (${(p.speed || 0).toFixed(0)} km/h) (${timeStr})`;
            }
         }
 
