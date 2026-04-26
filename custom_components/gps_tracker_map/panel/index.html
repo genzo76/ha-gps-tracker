@@ -1442,14 +1442,15 @@
       // DEEP SLEEP RECOVERY:
       // I dispositivi mobili smettono di inviare ping GPS quando sono perfettamente fermi.
       // Se tra un punto e l'altro c'è un buco di oltre 3 minuti, attribuiamo quella permanenza
-      // al punto di partenza assumendo che sia rimasto lì in sosta.
+      // al punto di partenza assumendo che sia rimasto lì in sosta (solo se la distanza è < 150m).
       for (let i = 0; i < pts.length - 1; i++) {
          let p = pts[i];
          let nextP = pts[i+1];
          let departTime = p.timeOut || p.time;
          let gapMin = (nextP.time - departTime) / 60000;
+         let distToNext = haversine(p.lat, p.lng, nextP.lat, nextP.lng) * 1000;
          
-         if (gapMin >= 3) {
+         if (gapMin >= 3 && distToNext < 150) {
              // Trasforma il silenzio gps in una sosta sul punto precedente, fino a poco prima del nuovo ping.
              p.timeOut = new Date(nextP.time.getTime() - 60000); 
          }
